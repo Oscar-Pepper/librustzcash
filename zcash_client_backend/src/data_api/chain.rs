@@ -143,7 +143,7 @@
 //! # }
 //! ```
 
-use std::ops::Range;
+use std::{future::Future, ops::Range};
 
 use sapling::note_encryption::PreparedIncomingViewingKey;
 use zcash_primitives::{
@@ -160,6 +160,8 @@ use crate::{
 
 pub mod error;
 use error::Error;
+
+use super::scanning::ScanRange;
 
 /// A struct containing metadata about a subtree root of the note commitment tree.
 ///
@@ -211,6 +213,32 @@ pub trait BlockSource {
     ) -> Result<(), error::Error<WalletErrT, Self::Error>>
     where
         F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>;
+}
+
+pub trait BlockCache: BlockSource + Send + Sync {
+    /// Returns a range of compact blocks from the cache.
+    fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error>;
+
+    /// Returns the height of highest block known to the block cache within a specified range.
+    /// If `range` is `None`, returns the tip of the entire cache.
+    fn cache_tip(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error>;
+
+    /// Inserts a set of compact blocks into the block cache.
+    /// Returns a `Future` for async implementations.
+    fn insert(
+        &self,
+        compact_blocks: Vec<CompactBlock>,
+    ) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Removes all cached blocks above a specified block height.
+    fn truncate(&self, block_height: BlockHeight) -> Result<(), Self::Error>;
+
+    /// Mark a range of blocks as scanned for cache removal.
+    fn mark_as_scanned(&self, range: &ScanRange) -> Result<(), Self::Error>;
+
+    /// Deletes all blocks currently marked as scanned from the block cache.
+    /// Returns a `Future` for async implementations.
+    fn delete_scanned(&self) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 /// Metadata about modifications to the wallet state made in the course of scanning a set of
