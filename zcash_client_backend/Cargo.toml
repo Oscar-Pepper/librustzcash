@@ -27,7 +27,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dependencies]
 zcash_address.workspace = true
 zcash_encoding.workspace = true
-zcash_keys.workspace = true
+zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_note_encryption.workspace = true
 zcash_primitives.workspace = true
 zip32.workspace = true
@@ -105,6 +105,7 @@ rand_core.workspace = true
 shardtree = { workspace = true, features = ["test-dependencies"] }
 zcash_proofs.workspace = true
 zcash_address = { workspace = true, features = ["test-dependencies"] }
+zcash_keys = { workspace = true, features = ["test-dependencies"] }
 
 time = ">=0.3.22, <0.3.24" # time 0.3.24 has MSRV 1.67
 
