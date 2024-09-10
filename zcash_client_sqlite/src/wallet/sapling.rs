@@ -683,12 +683,12 @@ pub(crate) mod tests {
         testing::pool::fully_funded_send_to_t::<SaplingPoolTester, OrchardPoolTester>()
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn multi_pool_checkpoint() {
+    async fn multi_pool_checkpoint() {
         use crate::wallet::orchard::tests::OrchardPoolTester;
 
-        testing::pool::multi_pool_checkpoint::<SaplingPoolTester, OrchardPoolTester>()
+        testing::pool::multi_pool_checkpoint::<SaplingPoolTester, OrchardPoolTester>().await
     }
 
     #[test]

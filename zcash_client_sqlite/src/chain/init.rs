@@ -24,8 +24,8 @@ use {
 /// let db = BlockDb::for_path(cache_file.path()).unwrap();
 /// init_cache_database(&db).unwrap();
 /// ```
-pub fn init_cache_database(db_cache: &BlockDb) -> Result<(), rusqlite::Error> {
-    db_cache.0.execute(
+pub async fn init_cache_database(db_cache: &BlockDb) -> Result<(), rusqlite::Error> {
+    db_cache.0.lock().await.execute(
         "CREATE TABLE IF NOT EXISTS compactblocks (
             height INTEGER PRIMARY KEY,
             data BLOB NOT NULL
@@ -55,8 +55,9 @@ pub fn init_cache_database(db_cache: &BlockDb) -> Result<(), rusqlite::Error> {
 /// init_blockmeta_db(&mut db).unwrap();
 /// ```
 #[cfg(feature = "unstable")]
-pub fn init_blockmeta_db(db: &mut FsBlockDb) -> Result<(), MigratorError<rusqlite::Error>> {
-    let adapter = RusqliteAdapter::new(&mut db.conn, Some("schemer_migrations".to_string()));
+pub async fn init_blockmeta_db(db: &mut FsBlockDb) -> Result<(), MigratorError<rusqlite::Error>> {
+    let mut connector = db.conn.lock().await;
+    let adapter = RusqliteAdapter::new(&mut connector, Some("schemer_migrations".to_string()));
     adapter.init().expect("Migrations table setup succeeds.");
 
     let mut migrator = Migrator::new(adapter);

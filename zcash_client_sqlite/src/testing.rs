@@ -149,11 +149,11 @@ impl TestBuilder<()> {
     }
 
     /// Adds a [`BlockDb`] cache to the test.
-    pub(crate) fn with_block_cache(self) -> TestBuilder<BlockCache> {
+    pub(crate) async fn with_block_cache(self) -> TestBuilder<BlockCache> {
         TestBuilder {
             rng: self.rng,
             network: self.network,
-            cache: BlockCache::new(),
+            cache: BlockCache::new().await,
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
@@ -162,11 +162,11 @@ impl TestBuilder<()> {
 
     /// Adds a [`FsBlockDb`] cache to the test.
     #[cfg(feature = "unstable")]
-    pub(crate) fn with_fs_block_cache(self) -> TestBuilder<FsBlockCache> {
+    pub(crate) async fn with_fs_block_cache(self) -> TestBuilder<FsBlockCache> {
         TestBuilder {
             rng: self.rng,
             network: self.network,
-            cache: FsBlockCache::new(),
+            cache: FsBlockCache::new().await,
             initial_chain_state: self.initial_chain_state,
             account_birthday: self.account_birthday,
             account_index: self.account_index,
@@ -450,7 +450,7 @@ where
         self.cached_blocks.range(..height).last().map(|(_, b)| b)
     }
 
-    fn cache_block(
+    async fn cache_block(
         &mut self,
         prev_block: &CachedBlock,
         compact_block: CompactBlock,
@@ -459,12 +459,12 @@ where
             compact_block.height(),
             prev_block.roll_forward(&compact_block),
         );
-        self.cache.insert(&compact_block)
+        self.cache.insert(&compact_block).await
     }
 
     /// Creates a fake block at the expected next height containing a single output of the
     /// given value, and inserts it into the cache.
-    pub(crate) fn generate_next_block<Fvk: TestFvk>(
+    pub(crate) async fn generate_next_block<Fvk: TestFvk>(
         &mut self,
         fvk: &Fvk,
         address_type: AddressType,
@@ -474,14 +474,16 @@ where
         let prior_cached_block = self.latest_cached_block().unwrap_or(&pre_activation_block);
         let height = prior_cached_block.height() + 1;
 
-        let (res, nfs) = self.generate_block_at(
-            height,
-            prior_cached_block.chain_state.block_hash(),
-            &[FakeCompactOutput::new(fvk, address_type, value)],
-            prior_cached_block.sapling_end_size,
-            prior_cached_block.orchard_end_size,
-            false,
-        );
+        let (res, nfs) = self
+            .generate_block_at(
+                height,
+                prior_cached_block.chain_state.block_hash(),
+                &[FakeCompactOutput::new(fvk, address_type, value)],
+                prior_cached_block.sapling_end_size,
+                prior_cached_block.orchard_end_size,
+                false,
+            )
+            .await;
 
         (height, res, nfs[0])
     }
@@ -511,7 +513,7 @@ where
 
     /// Adds an empty block to the cache, advancing the simulated chain height.
     #[allow(dead_code)] // used only for tests that are flagged off by default
-    pub(crate) fn generate_empty_block(&mut self) -> (BlockHeight, Cache::InsertResult) {
+    pub(crate) async fn generate_empty_block(&mut self) -> (BlockHeight, Cache::InsertResult) {
         let new_hash = {
             let mut hash = vec![0; 32];
             self.rng.fill_bytes(&mut hash);
@@ -538,7 +540,7 @@ where
             orchard_commitment_tree_size: prior_cached_block.orchard_end_size,
         });
 
-        let res = self.cache_block(&prior_cached_block, cb);
+        let res = self.cache_block(&prior_cached_block, cb).await;
         self.latest_block_height = Some(new_height);
 
         (new_height, res)
@@ -550,7 +552,7 @@ where
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] will build on it.
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn generate_block_at<Fvk: TestFvk>(
+    pub(crate) async fn generate_block_at<Fvk: TestFvk>(
         &mut self,
         height: BlockHeight,
         prev_hash: BlockHash,
@@ -623,7 +625,7 @@ where
         );
         assert_eq!(cb.height(), height);
 
-        let res = self.cache_block(&prior_cached_block, cb);
+        let res = self.cache_block(&prior_cached_block, cb).await;
         self.latest_block_height = Some(height);
 
         (res, nfs)
@@ -719,18 +721,18 @@ where
     }
 
     /// Invokes [`scan_cached_blocks`] with the given arguments, expecting success.
-    pub(crate) fn scan_cached_blocks(
+    pub(crate) async fn scan_cached_blocks(
         &mut self,
         from_height: BlockHeight,
         limit: usize,
     ) -> ScanSummary {
-        let result = self.try_scan_cached_blocks(from_height, limit);
+        let result = self.try_scan_cached_blocks(from_height, limit).await;
         assert_matches!(result, Ok(_));
         result.unwrap()
     }
 
     /// Invokes [`scan_cached_blocks`] with the given arguments.
-    pub(crate) fn try_scan_cached_blocks(
+    pub(crate) async fn try_scan_cached_blocks(
         &mut self,
         from_height: BlockHeight,
         limit: usize,
@@ -753,7 +755,8 @@ where
             from_height,
             &prior_cached_block.chain_state,
             limit,
-        );
+        )
+        .await;
         result
     }
 
@@ -2001,6 +2004,7 @@ fn fake_compact_block_from_compact_tx(
 }
 
 /// Trait used by tests that require a block cache.
+#[async_trait::async_trait]
 pub(crate) trait TestCache {
     type BlockSource: BlockSource;
     type InsertResult;
@@ -2009,7 +2013,7 @@ pub(crate) trait TestCache {
     fn block_source(&self) -> &Self::BlockSource;
 
     /// Inserts a CompactBlock into the cache DB.
-    fn insert(&self, cb: &CompactBlock) -> Self::InsertResult;
+    async fn insert(&self, cb: &CompactBlock) -> Self::InsertResult;
 }
 
 pub(crate) struct BlockCache {
@@ -2018,10 +2022,10 @@ pub(crate) struct BlockCache {
 }
 
 impl BlockCache {
-    fn new() -> Self {
+    async fn new() -> Self {
         let cache_file = NamedTempFile::new().unwrap();
         let db_cache = BlockDb::for_path(cache_file.path()).unwrap();
-        init_cache_database(&db_cache).unwrap();
+        init_cache_database(&db_cache).await.unwrap();
 
         BlockCache {
             _cache_file: cache_file,
@@ -2072,6 +2076,7 @@ impl NoteCommitments {
     }
 }
 
+#[async_trait::async_trait]
 impl TestCache for BlockCache {
     type BlockSource = BlockDb;
     type InsertResult = NoteCommitments;
@@ -2080,11 +2085,13 @@ impl TestCache for BlockCache {
         &self.db_cache
     }
 
-    fn insert(&self, cb: &CompactBlock) -> Self::InsertResult {
+    async fn insert(&self, cb: &CompactBlock) -> Self::InsertResult {
         let cb_bytes = cb.encode_to_vec();
         let res = NoteCommitments::from_compact_block(cb);
         self.db_cache
             .0
+            .lock()
+            .await
             .prepare("INSERT INTO compactblocks (height, data) VALUES (?, ?)")
             .unwrap()
             .execute(params![u32::from(cb.height()), cb_bytes,])
@@ -2101,10 +2108,10 @@ pub(crate) struct FsBlockCache {
 
 #[cfg(feature = "unstable")]
 impl FsBlockCache {
-    fn new() -> Self {
+    async fn new() -> Self {
         let fsblockdb_root = tempfile::tempdir().unwrap();
         let mut db_meta = FsBlockDb::for_path(&fsblockdb_root).unwrap();
-        init_blockmeta_db(&mut db_meta).unwrap();
+        init_blockmeta_db(&mut db_meta).await.unwrap();
 
         FsBlockCache {
             fsblockdb_root,
@@ -2114,6 +2121,7 @@ impl FsBlockCache {
 }
 
 #[cfg(feature = "unstable")]
+#[async_trait::async_trait]
 impl TestCache for FsBlockCache {
     type BlockSource = FsBlockDb;
     type InsertResult = BlockMeta;
@@ -2122,7 +2130,7 @@ impl TestCache for FsBlockCache {
         &self.db_meta
     }
 
-    fn insert(&self, cb: &CompactBlock) -> Self::InsertResult {
+    async fn insert(&self, cb: &CompactBlock) -> Self::InsertResult {
         use std::io::Write;
 
         let meta = BlockMeta {

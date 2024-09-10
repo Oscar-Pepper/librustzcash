@@ -167,9 +167,7 @@ use crate::{
 };
 
 #[cfg(feature = "sync")]
-use {
-    super::scanning::ScanPriority, crate::data_api::scanning::ScanRange, async_trait::async_trait,
-};
+use {super::scanning::ScanPriority, crate::data_api::scanning::ScanRange};
 
 pub mod error;
 use error::Error;
@@ -212,7 +210,8 @@ impl<H> CommitmentTreeRoot<H> {
 
 /// This trait provides sequential access to raw blockchain data via a callback-oriented
 /// API.
-pub trait BlockSource {
+#[async_trait::async_trait]
+pub trait BlockSource: Send + Sync {
     type Error;
 
     /// Scan the specified `limit` number of blocks from the blockchain, starting at
@@ -223,14 +222,14 @@ pub trait BlockSource {
     ///   as part of processing each row.
     /// * `NoteRefT`: the type of note identifiers in the wallet data store, for use in
     ///   reporting errors related to specific notes.
-    fn with_blocks<F, WalletErrT>(
+    async fn with_blocks<F, WalletErrT>(
         &self,
         from_height: Option<BlockHeight>,
         limit: Option<usize>,
         with_block: F,
     ) -> Result<(), error::Error<WalletErrT, Self::Error>>
     where
-        F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>;
+        F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>> + Send;
 }
 
 /// `BlockCache` is a trait that extends `BlockSource` and defines methods for managing
@@ -382,8 +381,8 @@ pub trait BlockSource {
 ///    assert_eq!(block_cache.get_tip_height(None).unwrap(), None);
 /// ```
 #[cfg(feature = "sync")]
-#[async_trait]
-pub trait BlockCache: BlockSource + Send + Sync
+#[async_trait::async_trait]
+pub trait BlockCache: BlockSource
 where
     Self::Error: Send,
 {
@@ -391,8 +390,10 @@ where
     ///
     /// If `range` is `None`, returns the tip of the entire cache.
     /// If no blocks are found in the cache, returns Ok(`None`).
-    fn get_tip_height(&self, range: Option<&ScanRange>)
-        -> Result<Option<BlockHeight>, Self::Error>;
+    async fn get_tip_height(
+        &self,
+        range: Option<&ScanRange>,
+    ) -> Result<Option<BlockHeight>, Self::Error>;
 
     /// Retrieves contiguous compact blocks specified by the given `range` from the block cache.
     ///
@@ -403,16 +404,29 @@ where
     ///
     /// This method should return an error if contiguous blocks cannot be read from the cache,
     /// indicating there are blocks missing.
-    async fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error>;
+    async fn read<WalletErrT>(
+        &self,
+        range: &ScanRange,
+    ) -> Result<Vec<CompactBlock>, error::Error<WalletErrT, Self::Error>>;
 
     /// Inserts a vec of compact blocks into the block cache.
     ///
     /// This method permits insertion of non-contiguous compact blocks.
-    async fn insert(&self, compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error>;
+    async fn insert<WalletErrT>(
+        &self,
+        compact_blocks: Vec<CompactBlock>,
+    ) -> Result<(), error::Error<WalletErrT, Self::Error>>;
 
     /// Removes all cached blocks above a specified block height.
-    async fn truncate(&self, block_height: BlockHeight) -> Result<(), Self::Error> {
-        if let Some(latest) = self.get_tip_height(None)? {
+    async fn truncate<WalletErrT: Send>(
+        &self,
+        block_height: BlockHeight,
+    ) -> Result<(), error::Error<WalletErrT, Self::Error>> {
+        if let Some(latest) = self
+            .get_tip_height(None)
+            .await
+            .map_err(Error::BlockSource)?
+        {
             self.delete(ScanRange::from_parts(
                 Range {
                     start: block_height + 1,
@@ -430,7 +444,10 @@ where
     /// # Errors
     ///
     /// In the case of an error, some blocks requested for deletion may remain in the block cache.
-    async fn delete(&self, range: ScanRange) -> Result<(), Self::Error>;
+    async fn delete<WalletErrT>(
+        &self,
+        range: ScanRange,
+    ) -> Result<(), error::Error<WalletErrT, Self::Error>>;
 }
 
 /// Metadata about modifications to the wallet state made in the course of scanning a set of
@@ -583,7 +600,7 @@ impl ChainState {
 /// This method will panic if `from_height != from_state.block_height() + 1`.
 #[tracing::instrument(skip(params, block_source, data_db, from_state))]
 #[allow(clippy::type_complexity)]
-pub fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
+pub async fn scan_cached_blocks<ParamsT, DbT, BlockSourceT>(
     params: &ParamsT,
     block_source: &BlockSourceT,
     data_db: &mut DbT,
@@ -606,9 +623,11 @@ where
     let scanning_keys = ScanningKeys::from_account_ufvks(account_ufvks);
     let mut runners = BatchRunners::<_, (), ()>::for_keys(100, &scanning_keys);
 
-    block_source.with_blocks::<_, DbT::Error>(Some(from_height), Some(limit), |block| {
-        runners.add_block(params, block).map_err(|e| e.into())
-    })?;
+    block_source
+        .with_blocks::<_, DbT::Error>(Some(from_height), Some(limit), |block| {
+            runners.add_block(params, block).map_err(|e| e.into())
+        })
+        .await?;
     runners.flush();
 
     let mut prior_block_metadata = if from_height > BlockHeight::from(0) {
@@ -632,10 +651,8 @@ where
 
     let mut scanned_blocks = vec![];
     let mut scan_summary = ScanSummary::for_range(from_height..from_height);
-    block_source.with_blocks::<_, DbT::Error>(
-        Some(from_height),
-        Some(limit),
-        |block: CompactBlock| {
+    block_source
+        .with_blocks::<_, DbT::Error>(Some(from_height), Some(limit), |block: CompactBlock| {
             scan_summary.scanned_range.end = block.height() + 1;
             let scanned_block = scan_block_with_runners::<_, _, _, (), ()>(
                 params,
@@ -689,8 +706,8 @@ where
             scanned_blocks.push(scanned_block);
 
             Ok(())
-        },
-    )?;
+        })
+        .await?;
 
     data_db
         .put_blocks(from_state, scanned_blocks)
@@ -698,30 +715,31 @@ where
     Ok(scan_summary)
 }
 
-#[cfg(feature = "test-dependencies")]
-pub mod testing {
-    use std::convert::Infallible;
-    use zcash_primitives::consensus::BlockHeight;
+// #[cfg(feature = "test-dependencies")]
+// pub mod testing {
+//     use std::convert::Infallible;
+//     use zcash_primitives::consensus::BlockHeight;
 
-    use crate::proto::compact_formats::CompactBlock;
+//     use crate::proto::compact_formats::CompactBlock;
 
-    use super::{error::Error, BlockSource};
+//     use super::{error::Error, BlockSource};
 
-    pub struct MockBlockSource;
+//     pub struct MockBlockSource;
 
-    impl BlockSource for MockBlockSource {
-        type Error = Infallible;
+//     #[async_trait::async_trait]
+//     impl BlockSource for MockBlockSource {
+//         type Error = Infallible;
 
-        fn with_blocks<F, DbErrT>(
-            &self,
-            _from_height: Option<BlockHeight>,
-            _limit: Option<usize>,
-            _with_row: F,
-        ) -> Result<(), Error<DbErrT, Infallible>>
-        where
-            F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, Infallible>>,
-        {
-            Ok(())
-        }
-    }
-}
+//         async fn with_blocks<F, DbErrT>(
+//             &self,
+//             _from_height: Option<BlockHeight>,
+//             _limit: Option<usize>,
+//             _with_row: F,
+//         ) -> Result<(), Error<DbErrT, Infallible>>
+//         where
+//             F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, Infallible>>,
+//         {
+//             Ok(())
+//         }
+//     }
+// }

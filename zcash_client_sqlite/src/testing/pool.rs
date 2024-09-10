@@ -147,9 +147,10 @@ pub(crate) trait ShieldedPoolTester {
     fn received_note_count(summary: &ScanSummary) -> usize;
 }
 
-pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
+pub(crate) async fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
+        .await
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -158,7 +159,9 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     // Add funds to the wallet in a single note
     let value = NonNegativeAmount::const_from_u64(60000);
-    let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h, _, _) = st
+        .generate_next_block(&dfvk, AddressType::DefaultExternal, value)
+        .await;
     st.scan_cached_blocks(h, 1);
 
     // Spendable balance matches total balance
@@ -301,7 +304,7 @@ pub(crate) fn send_single_step_proposed_transfer<T: ShieldedPoolTester>() {
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
+pub(crate) async fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     use std::{collections::HashSet, str::FromStr};
 
     use rand_core::OsRng;
@@ -322,6 +325,7 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 
     let mut st = TestBuilder::new()
         .with_block_cache()
+        .await
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -331,7 +335,9 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
     let dfvk = T::test_account_fvk(&st);
 
     let add_funds = |st: &mut TestState<_>, value| {
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let (h, _, _) = st
+            .generate_next_block(&dfvk, AddressType::DefaultExternal, value)
+            .await;
         st.scan_cached_blocks(h, 1);
 
         assert_eq!(
@@ -719,12 +725,13 @@ pub(crate) fn send_multi_step_proposed_transfer<T: ShieldedPoolTester>() {
 }
 
 #[cfg(feature = "transparent-inputs")]
-pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTester>() {
+pub(crate) async fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPoolTester>() {
     use nonempty::NonEmpty;
     use zcash_client_backend::proposal::{Proposal, ProposalError, StepOutput, StepOutputIndex};
 
     let mut st = TestBuilder::new()
         .with_block_cache()
+        .await
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -733,7 +740,9 @@ pub(crate) fn proposal_fails_if_not_all_ephemeral_outputs_consumed<T: ShieldedPo
     let dfvk = T::test_account_fvk(&st);
 
     let add_funds = |st: &mut TestState<_>, value| {
-        let (h, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+        let (h, _, _) = st
+            .generate_next_block(&dfvk, AddressType::DefaultExternal, value)
+            .await;
         st.scan_cached_blocks(h, 1);
 
         assert_eq!(
@@ -860,9 +869,10 @@ pub(crate) fn proposal_fails_with_no_blocks<T: ShieldedPoolTester>() {
     );
 }
 
-pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
+pub(crate) async fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
+        .await
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -872,7 +882,9 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
 
     // Add funds to the wallet in a single note
     let value = NonNegativeAmount::const_from_u64(50000);
-    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h1, _, _) = st
+        .generate_next_block(&dfvk, AddressType::DefaultExternal, value)
+        .await;
     st.scan_cached_blocks(h1, 1);
 
     // Spendable balance matches total balance at 1 confirmation.
@@ -894,7 +906,9 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     );
 
     // Add more funds to the wallet in a second note
-    let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h2, _, _) = st
+        .generate_next_block(&dfvk, AddressType::DefaultExternal, value)
+        .await;
     st.scan_cached_blocks(h2, 1);
 
     // Verified balance does not include the second note
@@ -963,7 +977,9 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     );
 
     // Mine block 11 so that the second note becomes verified
-    let (h11, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h11, _, _) = st
+        .generate_next_block(&dfvk, AddressType::DefaultExternal, value)
+        .await;
     st.scan_cached_blocks(h11, 1);
 
     // Total balance is value * number of blocks scanned (11).
@@ -1011,9 +1027,10 @@ pub(crate) fn spend_fails_on_unverified_notes<T: ShieldedPoolTester>() {
     );
 }
 
-pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
+pub(crate) async fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
+        .await
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -1025,7 +1042,9 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
 
     // Add funds to the wallet in a single note
     let value = NonNegativeAmount::const_from_u64(50000);
-    let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
+    let (h1, _, _) = st
+        .generate_next_block(&dfvk, AddressType::DefaultExternal, value)
+        .await;
     st.scan_cached_blocks(h1, 1);
 
     // Spendable balance matches total balance at 1 confirmation.
@@ -1105,11 +1124,13 @@ pub(crate) fn spend_fails_on_locked_notes<T: ShieldedPoolTester>() {
     );
 
     // Mine block SAPLING_ACTIVATION_HEIGHT + 42 so that the first transaction expires
-    let (h43, _, _) = st.generate_next_block(
-        &T::sk_to_fvk(&T::sk(&[42; 32])),
-        AddressType::DefaultExternal,
-        value,
-    );
+    let (h43, _, _) = st
+        .generate_next_block(
+            &T::sk_to_fvk(&T::sk(&[42; 32])),
+            AddressType::DefaultExternal,
+            value,
+        )
+        .await;
     st.scan_cached_blocks(h43, 1);
 
     // Spendable balance matches total balance at 1 confirmation.
@@ -2038,9 +2059,10 @@ pub(crate) fn fully_funded_send_to_t<P0: ShieldedPoolTester, P1: ShieldedPoolTes
 }
 
 #[cfg(feature = "orchard")]
-pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
+pub(crate) async fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
+        .await
         .with_account_from_sapling_activation(BlockHash([0; 32])) // TODO: Allow for Orchard
         // activation after Sapling
         .build();
@@ -2054,11 +2076,14 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
     // Add some funds to the wallet; we add two notes to allow successive spends. Also,
     // we will generate a note in the P1 pool to ensure that we have some tree state.
     let note_value = NonNegativeAmount::const_from_u64(500000);
-    let (start_height, _, _) =
-        st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
-    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
-    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value);
-    let scanned = st.scan_cached_blocks(start_height, 3);
+    let (start_height, _, _) = st
+        .generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value)
+        .await;
+    st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value)
+        .await;
+    st.generate_next_block(&p1_fvk, AddressType::DefaultExternal, note_value)
+        .await;
+    let scanned = st.scan_cached_blocks(start_height, 3).await;
 
     let next_to_scan = scanned.scanned_range().end;
 
@@ -2072,7 +2097,7 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
     }
 
     // Scan into the middle of the empty range
-    let scanned = st.scan_cached_blocks(next_to_scan, 5);
+    let scanned = st.scan_cached_blocks(next_to_scan, 5).await;
     let next_to_scan = scanned.scanned_range().end;
 
     // The initial balance should be unchanged.
@@ -2141,8 +2166,9 @@ pub(crate) fn multi_pool_checkpoint<P0: ShieldedPoolTester, P1: ShieldedPoolTest
     }
 
     // Generate another block with funds for us
-    let (max_height, _, _) =
-        st.generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value);
+    let (max_height, _, _) = st
+        .generate_next_block(&p0_fvk, AddressType::DefaultExternal, note_value)
+        .await;
 
     // Scan everything.
     st.scan_cached_blocks(
@@ -2285,9 +2311,10 @@ pub(crate) fn valid_chain_states<T: ShieldedPoolTester>() {
 
 // FIXME: This requires fixes to the test framework.
 #[allow(dead_code)]
-pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
+pub(crate) async fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
+        .await
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -2333,7 +2360,7 @@ pub(crate) fn invalid_chain_cache_disconnected<T: ShieldedPoolTester>() {
         st.try_scan_cached_blocks(
             disconnect_height,
             2
-        ),
+        ).await,
         Err(chain::error::Error::Scan(ScanError::PrevHashMismatch { at_height }))
             if at_height == disconnect_height
     );
@@ -2456,9 +2483,10 @@ pub(crate) fn scan_cached_blocks_allows_blocks_out_of_order<T: ShieldedPoolTeste
     );
 }
 
-pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
+pub(crate) async fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
     let mut st = TestBuilder::new()
         .with_block_cache()
+        .await
         .with_account_from_sapling_activation(BlockHash([0; 32]))
         .build();
 
@@ -2473,7 +2501,7 @@ pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
     let (h1, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value);
 
     // Scan the cache
-    let summary = st.scan_cached_blocks(h1, 1);
+    let summary = st.scan_cached_blocks(h1, 1).await;
     assert_eq!(summary.scanned_range().start, h1);
     assert_eq!(summary.scanned_range().end, h1 + 1);
     assert_eq!(T::received_note_count(&summary), 1);
@@ -2486,7 +2514,7 @@ pub(crate) fn scan_cached_blocks_finds_received_notes<T: ShieldedPoolTester>() {
     let (h2, _, _) = st.generate_next_block(&dfvk, AddressType::DefaultExternal, value2);
 
     // Scan the cache again
-    let summary = st.scan_cached_blocks(h2, 1);
+    let summary = st.scan_cached_blocks(h2, 1).await;
     assert_eq!(summary.scanned_range().start, h2);
     assert_eq!(summary.scanned_range().end, h2 + 1);
     assert_eq!(T::received_note_count(&summary), 1);
