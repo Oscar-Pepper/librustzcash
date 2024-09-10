@@ -166,13 +166,13 @@ use crate::{
     scanning::{scan_block_with_runners, BatchRunners, Nullifiers, ScanningKeys},
 };
 
-#[cfg(feature = "sync")]
-use {super::scanning::ScanPriority, crate::data_api::scanning::ScanRange};
-
 pub mod error;
 use error::Error;
 
-use super::WalletRead;
+use super::{
+    scanning::{ScanPriority, ScanRange},
+    WalletRead,
+};
 
 /// A struct containing metadata about a subtree root of the note commitment tree.
 ///
@@ -380,7 +380,6 @@ pub trait BlockSource: Send + Sync {
 ///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 0);
 ///    assert_eq!(block_cache.get_tip_height(None).unwrap(), None);
 /// ```
-#[cfg(feature = "sync")]
 #[async_trait::async_trait]
 pub trait BlockCache: BlockSource {
     /// Finds the height of the highest block known to the block cache within a specified range.
@@ -710,31 +709,31 @@ where
     Ok(scan_summary)
 }
 
-// #[cfg(feature = "test-dependencies")]
-// pub mod testing {
-//     use std::convert::Infallible;
-//     use zcash_primitives::consensus::BlockHeight;
+#[cfg(feature = "test-dependencies")]
+pub mod testing {
+    use std::convert::Infallible;
+    use zcash_primitives::consensus::BlockHeight;
 
-//     use crate::proto::compact_formats::CompactBlock;
+    use crate::proto::compact_formats::CompactBlock;
 
-//     use super::{error::Error, BlockSource};
+    use super::{error::Error, BlockSource};
 
-//     pub struct MockBlockSource;
+    pub struct MockBlockSource;
 
-//     #[async_trait::async_trait]
-//     impl BlockSource for MockBlockSource {
-//         type Error = Infallible;
+    #[async_trait::async_trait]
+    impl BlockSource for MockBlockSource {
+        type Error = Infallible;
 
-//         async fn with_blocks<F, DbErrT>(
-//             &self,
-//             _from_height: Option<BlockHeight>,
-//             _limit: Option<usize>,
-//             _with_row: F,
-//         ) -> Result<(), Error<DbErrT, Infallible>>
-//         where
-//             F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, Infallible>>,
-//         {
-//             Ok(())
-//         }
-//     }
-// }
+        async fn with_blocks<F, DbErrT>(
+            &self,
+            _from_height: Option<BlockHeight>,
+            _limit: Option<usize>,
+            _with_row: F,
+        ) -> Result<(), Error<DbErrT, Infallible>>
+        where
+            F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, Infallible>> + Send,
+        {
+            Ok(())
+        }
+    }
+}

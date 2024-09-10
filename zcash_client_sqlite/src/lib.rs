@@ -49,7 +49,7 @@ use zcash_client_backend::{
     address::UnifiedAddress,
     data_api::{
         self,
-        chain::{BlockSource, ChainState, CommitmentTreeRoot},
+        chain::{BlockCache, BlockSource, ChainState, CommitmentTreeRoot},
         scanning::{ScanPriority, ScanRange},
         Account, AccountBirthday, AccountPurpose, AccountSource, BlockMetadata,
         DecryptedTransaction, InputSource, NullifierQuery, ScannedBlock, SeedRelevance,
@@ -1438,9 +1438,110 @@ impl BlockSource for BlockDb {
         with_row: F,
     ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
     where
-        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>,
+        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
+            + Send,
     {
         chain::blockdb_with_blocks(self, from_height, limit, with_row).await
+    }
+}
+
+impl BlockCache for BlockDb {
+    fn get_tip_height<'life0, 'life1, 'async_trait>(
+        &'life0 self,
+        range: Option<&'life1 ScanRange>,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<Output = Result<Option<BlockHeight>, Self::Error>>
+                + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait,
+    {
+        todo!()
+    }
+
+    fn read<'life0, 'life1, 'async_trait, WalletErrT>(
+        &'life0 self,
+        range: &'life1 ScanRange,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = Result<
+                        Vec<CompactBlock>,
+                        data_api::chain::error::Error<WalletErrT, Self::Error>,
+                    >,
+                > + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        WalletErrT: 'async_trait,
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait,
+    {
+        todo!()
+    }
+
+    fn insert<'life0, 'async_trait, WalletErrT>(
+        &'life0 self,
+        compact_blocks: Vec<CompactBlock>,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>>,
+                > + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        WalletErrT: 'async_trait,
+        'life0: 'async_trait,
+        Self: 'async_trait,
+    {
+        todo!()
+    }
+
+    fn truncate<'life0, 'async_trait, WalletErrT>(
+        &'life0 self,
+        block_height: BlockHeight,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>>,
+                > + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        WalletErrT: 'async_trait + Send,
+        'life0: 'async_trait,
+        Self: core::marker::Sync + 'async_trait,
+    {
+        todo!()
+    }
+
+    fn delete<'life0, 'async_trait, WalletErrT>(
+        &'life0 self,
+        range: ScanRange,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>>,
+                > + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        WalletErrT: 'async_trait,
+        'life0: 'async_trait,
+        Self: 'async_trait,
+    {
+        todo!()
     }
 }
 
@@ -1639,9 +1740,111 @@ impl BlockSource for FsBlockDb {
         with_row: F,
     ) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
     where
-        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>,
+        F: FnMut(CompactBlock) -> Result<(), data_api::chain::error::Error<DbErrT, Self::Error>>
+            + Send,
     {
         fsblockdb_with_blocks(self, from_height, limit, with_row).await
+    }
+}
+
+#[cfg(feature = "unstable")]
+impl BlockCache for FsBlockDb {
+    fn get_tip_height<'life0, 'life1, 'async_trait>(
+        &'life0 self,
+        range: Option<&'life1 ScanRange>,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<Output = Result<Option<BlockHeight>, Self::Error>>
+                + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait,
+    {
+        todo!()
+    }
+
+    fn read<'life0, 'life1, 'async_trait, WalletErrT>(
+        &'life0 self,
+        range: &'life1 ScanRange,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = Result<
+                        Vec<CompactBlock>,
+                        data_api::chain::error::Error<WalletErrT, Self::Error>,
+                    >,
+                > + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        WalletErrT: 'async_trait,
+        'life0: 'async_trait,
+        'life1: 'async_trait,
+        Self: 'async_trait,
+    {
+        todo!()
+    }
+
+    fn insert<'life0, 'async_trait, WalletErrT>(
+        &'life0 self,
+        compact_blocks: Vec<CompactBlock>,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>>,
+                > + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        WalletErrT: 'async_trait,
+        'life0: 'async_trait,
+        Self: 'async_trait,
+    {
+        todo!()
+    }
+
+    fn truncate<'life0, 'async_trait, WalletErrT>(
+        &'life0 self,
+        block_height: BlockHeight,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>>,
+                > + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        WalletErrT: 'async_trait + Send,
+        'life0: 'async_trait,
+        Self: core::marker::Sync + 'async_trait,
+    {
+        todo!()
+    }
+
+    fn delete<'life0, 'async_trait, WalletErrT>(
+        &'life0 self,
+        range: ScanRange,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<
+                    Output = Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>>,
+                > + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        WalletErrT: 'async_trait,
+        'life0: 'async_trait,
+        Self: 'async_trait,
+    {
+        todo!()
     }
 }
 

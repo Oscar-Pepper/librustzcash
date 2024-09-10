@@ -26,6 +26,7 @@ use sapling::{
     zip32::DiversifiableFullViewingKey,
     Note, Nullifier,
 };
+use zcash_client_backend::data_api::scanning::ScanRange;
 use zcash_client_backend::data_api::Account as AccountTrait;
 #[allow(deprecated)]
 use zcash_client_backend::{
@@ -433,6 +434,7 @@ pub(crate) struct TestState<Cache> {
 impl<Cache: TestCache> TestState<Cache>
 where
     <Cache::BlockSource as BlockSource>::Error: fmt::Debug,
+    <Cache::BlockCache as BlockSource>::Error: fmt::Debug,
 {
     /// Exposes an immutable reference to the test's [`BlockSource`].
     #[cfg(feature = "unstable")]
@@ -491,7 +493,7 @@ where
     /// Creates a fake block at the expected next height containing multiple outputs
     /// and inserts it into the cache.
     #[allow(dead_code)]
-    pub(crate) fn generate_next_block_multi<Fvk: TestFvk>(
+    pub(crate) async fn generate_next_block_multi<Fvk: TestFvk>(
         &mut self,
         outputs: &[FakeCompactOutput<Fvk>],
     ) -> (BlockHeight, Cache::InsertResult, Vec<Fvk::Nullifier>) {
@@ -499,14 +501,16 @@ where
         let prior_cached_block = self.latest_cached_block().unwrap_or(&pre_activation_block);
         let height = prior_cached_block.height() + 1;
 
-        let (res, nfs) = self.generate_block_at(
-            height,
-            prior_cached_block.chain_state.block_hash(),
-            outputs,
-            prior_cached_block.sapling_end_size,
-            prior_cached_block.orchard_end_size,
-            false,
-        );
+        let (res, nfs) = self
+            .generate_block_at(
+                height,
+                prior_cached_block.chain_state.block_hash(),
+                outputs,
+                prior_cached_block.sapling_end_size,
+                prior_cached_block.orchard_end_size,
+                false,
+            )
+            .await;
 
         (height, res, nfs)
     }
@@ -633,7 +637,7 @@ where
 
     /// Creates a fake block at the expected next height spending the given note, and
     /// inserts it into the cache.
-    pub(crate) fn generate_next_block_spending<Fvk: TestFvk>(
+    pub(crate) async fn generate_next_block_spending<Fvk: TestFvk>(
         &mut self,
         fvk: &Fvk,
         note: (Fvk::Nullifier, NonNegativeAmount),
@@ -660,7 +664,7 @@ where
         );
         assert_eq!(cb.height(), height);
 
-        let res = self.cache_block(&prior_cached_block, cb);
+        let res = self.cache_block(&prior_cached_block, cb).await;
         self.latest_block_height = Some(height);
 
         (height, res)
@@ -671,7 +675,7 @@ where
     ///
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] (or similar) will build on it.
-    pub(crate) fn generate_next_block_including(
+    pub(crate) async fn generate_next_block_including(
         &mut self,
         txid: TxId,
     ) -> (BlockHeight, Cache::InsertResult) {
@@ -684,7 +688,7 @@ where
         // Index 0 is by definition a coinbase transaction, and the wallet doesn't
         // construct coinbase transactions. So we pretend here that the block has a
         // coinbase transaction that does not have shielded coinbase outputs.
-        self.generate_next_block_from_tx(1, &tx)
+        self.generate_next_block_from_tx(1, &tx).await
     }
 
     /// Creates a fake block at the expected next height containing only the given
@@ -692,7 +696,7 @@ where
     ///
     /// This generated block will be treated as the latest block, and subsequent calls to
     /// [`Self::generate_next_block`] will build on it.
-    pub(crate) fn generate_next_block_from_tx(
+    pub(crate) async fn generate_next_block_from_tx(
         &mut self,
         tx_index: usize,
         tx: &Transaction,
@@ -714,7 +718,7 @@ where
         );
         assert_eq!(cb.height(), height);
 
-        let res = self.cache_block(&prior_cached_block, cb);
+        let res = self.cache_block(&prior_cached_block, cb).await;
         self.latest_block_height = Some(height);
 
         (height, res)
@@ -738,26 +742,26 @@ where
         limit: usize,
     ) -> Result<
         ScanSummary,
-        data_api::chain::error::Error<
-            SqliteClientError,
-            <Cache::BlockSource as BlockSource>::Error,
-        >,
+        data_api::chain::error::Error<SqliteClientError, <Cache::BlockCache as BlockSource>::Error>,
     > {
         let prior_cached_block = self
             .latest_cached_block_below_height(from_height)
             .cloned()
             .unwrap_or_else(|| CachedBlock::none(from_height - 1));
 
-        let result = scan_cached_blocks(
+        let scan_range = ScanRange::from_parts(
+            from_height..from_height + limit as u32,
+            data_api::scanning::ScanPriority::Historic,
+        );
+
+        scan_cached_blocks(
             &self.network(),
-            self.cache.block_source(),
+            self.cache.block_cache(),
             &mut self.db_data,
-            from_height,
             &prior_cached_block.chain_state,
-            limit,
+            &scan_range,
         )
-        .await;
-        result
+        .await
     }
 
     /// Resets the wallet using a new wallet database but with the same cache of blocks,
@@ -2007,10 +2011,14 @@ fn fake_compact_block_from_compact_tx(
 #[async_trait::async_trait]
 pub(crate) trait TestCache {
     type BlockSource: BlockSource;
+    type BlockCache: data_api::chain::BlockCache;
     type InsertResult;
 
     /// Exposes the block cache as a [`BlockSource`].
     fn block_source(&self) -> &Self::BlockSource;
+
+    /// Exposes the block cache as a [`BlockCache`].
+    fn block_cache(&self) -> &Self::BlockCache;
 
     /// Inserts a CompactBlock into the cache DB.
     async fn insert(&self, cb: &CompactBlock) -> Self::InsertResult;
@@ -2079,9 +2087,14 @@ impl NoteCommitments {
 #[async_trait::async_trait]
 impl TestCache for BlockCache {
     type BlockSource = BlockDb;
+    type BlockCache = BlockDb;
     type InsertResult = NoteCommitments;
 
     fn block_source(&self) -> &Self::BlockSource {
+        &self.db_cache
+    }
+
+    fn block_cache(&self) -> &Self::BlockCache {
         &self.db_cache
     }
 
@@ -2124,9 +2137,14 @@ impl FsBlockCache {
 #[async_trait::async_trait]
 impl TestCache for FsBlockCache {
     type BlockSource = FsBlockDb;
+    type BlockCache = FsBlockDb;
     type InsertResult = BlockMeta;
 
     fn block_source(&self) -> &Self::BlockSource {
+        &self.db_meta
+    }
+
+    fn block_cache(&self) -> &Self::BlockCache {
         &self.db_meta
     }
 
