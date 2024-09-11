@@ -32,6 +32,8 @@
 //! # }
 //! #
 //! # fn test() -> Result<(), Error<(), Infallible>> {
+//! # let rt = tokio::runtime::Runtime::new().unwrap();
+//! # rt.block_on(async {
 //! let network = Network::TestNetwork;
 //! let block_source = chain_testing::MockBlockSource;
 //! let mut wallet_db = testing::MockWalletDb::new(Network::TestNetwork);
@@ -70,10 +72,9 @@
 //!                 &network,
 //!                 &block_source,
 //!                 &mut wallet_db,
-//!                 scan_range.block_range().start,
 //!                 chain_state,
-//!                 scan_range.len()
-//!             );
+//!                 scan_range
+//!             ).await;
 //!
 //!             // Check for scanning errors that indicate that the wallet's chain tip is out of
 //!             // sync with blockchain history.
@@ -139,14 +140,14 @@
 //!         &network,
 //!         &block_source,
 //!         &mut wallet_db,
-//!         scan_range.block_range().start,
 //!         chain_state,
-//!         scan_range.len()
-//!     )?;
+//!         &scan_range
+//!     ).await?;
 //!
 //!     // Handle scan errors, etc.
 //! }
 //! # Ok(())
+//! # })
 //! # }
 //! # }
 //! ```
@@ -705,9 +706,9 @@ pub mod testing {
     use std::convert::Infallible;
     use zcash_primitives::consensus::BlockHeight;
 
-    use crate::proto::compact_formats::CompactBlock;
+    use crate::{data_api::scanning::ScanRange, proto::compact_formats::CompactBlock};
 
-    use super::{error::Error, BlockSource};
+    use super::{error::Error, BlockCache, BlockSource};
 
     pub struct MockBlockSource;
 
@@ -724,6 +725,37 @@ pub mod testing {
         where
             F: FnMut(CompactBlock) -> Result<(), Error<DbErrT, Infallible>> + Send,
         {
+            Ok(())
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl BlockCache for MockBlockSource {
+        async fn get_tip_height<WalletErrT>(
+            &self,
+            _range: Option<&ScanRange>,
+        ) -> Result<Option<BlockHeight>, Error<WalletErrT, Self::Error>> {
+            Ok(None)
+        }
+
+        async fn read<WalletErrT>(
+            &self,
+            _range: &ScanRange,
+        ) -> Result<Vec<CompactBlock>, Error<WalletErrT, Self::Error>> {
+            Ok(Vec::new())
+        }
+
+        async fn insert<WalletErrT>(
+            &self,
+            _compact_blocks: Vec<CompactBlock>,
+        ) -> Result<(), Error<WalletErrT, Self::Error>> {
+            Ok(())
+        }
+
+        async fn delete<WalletErrT>(
+            &self,
+            _range: ScanRange,
+        ) -> Result<(), Error<WalletErrT, Self::Error>> {
             Ok(())
         }
     }

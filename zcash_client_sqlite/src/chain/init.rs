@@ -14,6 +14,8 @@ use {
 /// # Examples
 ///
 /// ```
+/// # let rt = tokio::runtime::Runtime::new().unwrap();
+/// # rt.block_on(async {
 /// use tempfile::NamedTempFile;
 /// use zcash_client_sqlite::{
 ///     BlockDb,
@@ -22,7 +24,8 @@ use {
 ///
 /// let cache_file = NamedTempFile::new().unwrap();
 /// let db = BlockDb::for_path(cache_file.path()).unwrap();
-/// init_cache_database(&db).unwrap();
+/// init_cache_database(&db).await.unwrap();
+/// # });
 /// ```
 pub async fn init_cache_database(db_cache: &BlockDb) -> Result<(), rusqlite::Error> {
     db_cache.0.lock().await.execute(
