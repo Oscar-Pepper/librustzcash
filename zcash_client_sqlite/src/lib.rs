@@ -1833,6 +1833,9 @@ impl BlockCache for FsBlockDb {
                 .await
                 .map_err(|e| data_api::chain::error::Error::BlockSource(FsBlockDbError::Fs(e)))?;
         }
+
+        // TODO: implement a fn to delete block metadata?
+
         Ok(())
     }
 }

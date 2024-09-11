@@ -251,17 +251,18 @@ pub trait BlockSource: Send + Sync {
 ///        cached_blocks: Arc<Mutex<Vec<CompactBlock>>>,
 ///    }
 ///
+/// #    #[async_trait]
 /// #    impl BlockSource for ExampleBlockCache {
 /// #        type Error = ();
 /// #
-/// #        fn with_blocks<F, WalletErrT>(
+/// #        async fn with_blocks<F, WalletErrT>(
 /// #            &self,
 /// #            _from_height: Option<BlockHeight>,
 /// #            _limit: Option<usize>,
 /// #            _with_block: F,
 /// #        ) -> Result<(), error::Error<WalletErrT, Self::Error>>
 /// #        where
-/// #            F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>>,
+/// #            F: FnMut(CompactBlock) -> Result<(), error::Error<WalletErrT, Self::Error>> + Send,
 /// #        {
 /// #            Ok(())
 /// #        }
@@ -269,7 +270,7 @@ pub trait BlockSource: Send + Sync {
 /// #
 ///    #[async_trait]
 ///    impl BlockCache for ExampleBlockCache {
-///        fn get_tip_height(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, Self::Error> {
+///        async fn get_tip_height<DbErrT>(&self, range: Option<&ScanRange>) -> Result<Option<BlockHeight>, error::Error<DbErrT, Self::Error>> {
 ///            let cached_blocks = self.cached_blocks.lock().unwrap();
 ///            let blocks: Vec<&CompactBlock> = match range {
 ///                Some(range) => cached_blocks
@@ -285,7 +286,7 @@ pub trait BlockSource: Send + Sync {
 ///            Ok(highest_block.map(|&block| BlockHeight::from_u32(block.height as u32)))
 ///        }
 ///
-///        async fn read(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, Self::Error> {
+///        async fn read<DbErrT>(&self, range: &ScanRange) -> Result<Vec<CompactBlock>, error::Error<DbErrT, Self::Error>> {
 ///            Ok(self
 ///                .cached_blocks
 ///                .lock()
@@ -299,7 +300,7 @@ pub trait BlockSource: Send + Sync {
 ///                .collect())
 ///        }
 ///
-///        async fn insert(&self, mut compact_blocks: Vec<CompactBlock>) -> Result<(), Self::Error> {
+///        async fn insert<DbErrT>(&self, mut compact_blocks: Vec<CompactBlock>) -> Result<(), error::Error<DbErrT, Self::Error>> {
 ///            self.cached_blocks
 ///                .lock()
 ///                .unwrap()
@@ -307,7 +308,7 @@ pub trait BlockSource: Send + Sync {
 ///            Ok(())
 ///        }
 ///
-///        async fn delete(&self, range: ScanRange) -> Result<(), Self::Error> {
+///        async fn delete<DbErrT>(&self, range: ScanRange) -> Result<(), error::Error<DbErrT, Self::Error>> {
 ///            self.cached_blocks
 ///                .lock()
 ///                .unwrap()
@@ -347,38 +348,32 @@ pub trait BlockSource: Send + Sync {
 /// #    );
 ///    let compact_blocks = vec![compact_block1, compact_block2];
 ///
-///    // Insert blocks into the block cache
 ///    rt.block_on(async {
-///        block_cache.insert(compact_blocks.clone()).await.unwrap();
-///    });
-///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 2);
+///        // Insert blocks into the block cache
+///        block_cache.insert::<()>(compact_blocks.clone()).await.unwrap();
+///        assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 2);
 ///
-///    // Find highest block in the block cache
-///    let get_tip_height = block_cache.get_tip_height(None).unwrap();
-///    assert_eq!(get_tip_height, Some(BlockHeight::from_u32(2)));
+///        // Find highest block in the block cache
+///        let get_tip_height = block_cache.get_tip_height::<()>(None).await.unwrap();
+///        assert_eq!(get_tip_height, Some(BlockHeight::from_u32(2)));
 ///
-///    // Read from the block cache
-///    rt.block_on(async {
-///        let blocks_from_cache = block_cache.read(&range).await.unwrap();
+///        // Read from the block cache
+///        let blocks_from_cache = block_cache.read::<()>(&range).await.unwrap();
 ///        assert_eq!(blocks_from_cache, compact_blocks);
-///    });
 ///
-///    // Truncate the block cache
-///    rt.block_on(async {
-///        block_cache.truncate(BlockHeight::from_u32(1)).await.unwrap();
-///    });
-///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 1);
-///    assert_eq!(
-///        block_cache.get_tip_height(None).unwrap(),
-///        Some(BlockHeight::from_u32(1))
-///    );
+///        // Truncate the block cache
+///        block_cache.truncate::<()>(BlockHeight::from_u32(1)).await.unwrap();
+///        assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 1);
+///        assert_eq!(
+///            block_cache.get_tip_height::<()>(None).await.unwrap(),
+///            Some(BlockHeight::from_u32(1))
+///        );
 ///
-///    // Delete blocks from the block cache
-///    rt.block_on(async {
-///        block_cache.delete(range).await.unwrap();
+///        // Delete blocks from the block cache
+///        block_cache.delete::<()>(range).await.unwrap();
+///        assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 0);
+///        assert_eq!(block_cache.get_tip_height::<()>(None).await.unwrap(), None);
 ///    });
-///    assert_eq!(block_cache.cached_blocks.lock().unwrap().len(), 0);
-///    assert_eq!(block_cache.get_tip_height(None).unwrap(), None);
 /// ```
 #[async_trait::async_trait]
 pub trait BlockCache: BlockSource {
