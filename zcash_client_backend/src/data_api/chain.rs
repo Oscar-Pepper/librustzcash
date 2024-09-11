@@ -386,10 +386,10 @@ pub trait BlockCache: BlockSource {
     ///
     /// If `range` is `None`, returns the tip of the entire cache.
     /// If no blocks are found in the cache, returns Ok(`None`).
-    async fn get_tip_height(
+    async fn get_tip_height<WalletErrT>(
         &self,
         range: Option<&ScanRange>,
-    ) -> Result<Option<BlockHeight>, Self::Error>;
+    ) -> Result<Option<BlockHeight>, error::Error<WalletErrT, Self::Error>>;
 
     /// Retrieves contiguous compact blocks specified by the given `range` from the block cache.
     ///
@@ -418,11 +418,7 @@ pub trait BlockCache: BlockSource {
         &self,
         block_height: BlockHeight,
     ) -> Result<(), error::Error<WalletErrT, Self::Error>> {
-        if let Some(latest) = self
-            .get_tip_height(None)
-            .await
-            .map_err(Error::BlockSource)?
-        {
+        if let Some(latest) = self.get_tip_height(None).await? {
             self.delete(ScanRange::from_parts(
                 Range {
                     start: block_height + 1,

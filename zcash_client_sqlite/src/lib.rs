@@ -114,8 +114,9 @@ impl<T> ParallelSliceMut<T> for [T] {
 #[cfg(feature = "unstable")]
 use {
     crate::chain::{fsblockdb_with_blocks, BlockMeta},
+    prost::Message,
     std::path::PathBuf,
-    std::{fs, io},
+    std::{fs, io, io::Write},
 };
 
 pub mod chain;
@@ -1446,13 +1447,17 @@ impl BlockSource for BlockDb {
 }
 
 impl BlockCache for BlockDb {
-    fn get_tip_height<'life0, 'life1, 'async_trait>(
+    fn get_tip_height<'life0, 'life1, 'async_trait, WalletErrT>(
         &'life0 self,
-        range: Option<&'life1 ScanRange>,
+        _range: Option<&'life1 ScanRange>,
     ) -> core::pin::Pin<
         Box<
-            dyn core::future::Future<Output = Result<Option<BlockHeight>, Self::Error>>
-                + core::marker::Send
+            dyn core::future::Future<
+                    Output = Result<
+                        Option<BlockHeight>,
+                        data_api::chain::error::Error<WalletErrT, Self::Error>,
+                    >,
+                > + core::marker::Send
                 + 'async_trait,
         >,
     >
@@ -1466,7 +1471,7 @@ impl BlockCache for BlockDb {
 
     fn read<'life0, 'life1, 'async_trait, WalletErrT>(
         &'life0 self,
-        range: &'life1 ScanRange,
+        _range: &'life1 ScanRange,
     ) -> core::pin::Pin<
         Box<
             dyn core::future::Future<
@@ -1489,7 +1494,7 @@ impl BlockCache for BlockDb {
 
     fn insert<'life0, 'async_trait, WalletErrT>(
         &'life0 self,
-        compact_blocks: Vec<CompactBlock>,
+        _compact_blocks: Vec<CompactBlock>,
     ) -> core::pin::Pin<
         Box<
             dyn core::future::Future<
@@ -1506,28 +1511,9 @@ impl BlockCache for BlockDb {
         todo!()
     }
 
-    fn truncate<'life0, 'async_trait, WalletErrT>(
-        &'life0 self,
-        block_height: BlockHeight,
-    ) -> core::pin::Pin<
-        Box<
-            dyn core::future::Future<
-                    Output = Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>>,
-                > + core::marker::Send
-                + 'async_trait,
-        >,
-    >
-    where
-        WalletErrT: 'async_trait + Send,
-        'life0: 'async_trait,
-        Self: core::marker::Sync + 'async_trait,
-    {
-        todo!()
-    }
-
     fn delete<'life0, 'async_trait, WalletErrT>(
         &'life0 self,
-        range: ScanRange,
+        _range: ScanRange,
     ) -> core::pin::Pin<
         Box<
             dyn core::future::Future<
@@ -1748,103 +1734,106 @@ impl BlockSource for FsBlockDb {
 }
 
 #[cfg(feature = "unstable")]
+#[async_trait::async_trait]
 impl BlockCache for FsBlockDb {
-    fn get_tip_height<'life0, 'life1, 'async_trait>(
-        &'life0 self,
-        range: Option<&'life1 ScanRange>,
-    ) -> core::pin::Pin<
-        Box<
-            dyn core::future::Future<Output = Result<Option<BlockHeight>, Self::Error>>
-                + core::marker::Send
-                + 'async_trait,
-        >,
-    >
-    where
-        'life0: 'async_trait,
-        'life1: 'async_trait,
-        Self: 'async_trait,
-    {
-        todo!()
+    async fn get_tip_height<DbErrT>(
+        &self,
+        range: Option<&ScanRange>,
+    ) -> Result<Option<BlockHeight>, data_api::chain::error::Error<DbErrT, Self::Error>> {
+        // TODO: Implement cache tip for a specified range.
+        if range.is_some() {
+            panic!("Cache tip for a specified range not currently implemented.")
+        }
+
+        Ok(
+            chain::blockmetadb_get_max_cached_height(&*self.conn.lock().await)
+                .map_err(|e| data_api::chain::error::Error::BlockSource(FsBlockDbError::Db(e)))?,
+        )
     }
 
-    fn read<'life0, 'life1, 'async_trait, WalletErrT>(
-        &'life0 self,
-        range: &'life1 ScanRange,
-    ) -> core::pin::Pin<
-        Box<
-            dyn core::future::Future<
-                    Output = Result<
-                        Vec<CompactBlock>,
-                        data_api::chain::error::Error<WalletErrT, Self::Error>,
-                    >,
-                > + core::marker::Send
-                + 'async_trait,
-        >,
-    >
-    where
-        WalletErrT: 'async_trait,
-        'life0: 'async_trait,
-        'life1: 'async_trait,
-        Self: 'async_trait,
-    {
-        todo!()
+    async fn read<DbErrT>(
+        &self,
+        range: &ScanRange,
+    ) -> Result<Vec<CompactBlock>, data_api::chain::error::Error<DbErrT, Self::Error>> {
+        let mut compact_blocks = vec![];
+        self.with_blocks(
+            Some(range.block_range().start),
+            Some(range.len()),
+            |block| {
+                compact_blocks.push(block);
+                Ok(())
+            },
+        )
+        .await?;
+        Ok(compact_blocks)
     }
 
-    fn insert<'life0, 'async_trait, WalletErrT>(
-        &'life0 self,
+    async fn insert<WalletErrT>(
+        &self,
         compact_blocks: Vec<CompactBlock>,
-    ) -> core::pin::Pin<
-        Box<
-            dyn core::future::Future<
-                    Output = Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>>,
-                > + core::marker::Send
-                + 'async_trait,
-        >,
-    >
-    where
-        WalletErrT: 'async_trait,
-        'life0: 'async_trait,
-        Self: 'async_trait,
-    {
-        todo!()
+    ) -> Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>> {
+        if compact_blocks.is_empty() {
+            panic!("`compact_blocks` is empty, cannot insert zero blocks into cache!");
+        }
+
+        let mut block_meta = Vec::<BlockMeta>::with_capacity(compact_blocks.len());
+
+        for block in compact_blocks {
+            let (sapling_outputs_count, orchard_actions_count) = block
+                .vtx
+                .iter()
+                .map(|tx| (tx.outputs.len() as u32, tx.actions.len() as u32))
+                .fold((0, 0), |(acc_sapling, acc_orchard), (sapling, orchard)| {
+                    (acc_sapling + sapling, acc_orchard + orchard)
+                });
+
+            let meta = BlockMeta {
+                height: block.height(),
+                block_hash: block.hash(),
+                block_time: block.time,
+                sapling_outputs_count,
+                orchard_actions_count,
+            };
+
+            let encoded = block.encode_to_vec();
+            let mut block_file = std::fs::File::create(
+                meta.block_file_path(self.blocks_dir.as_ref()),
+            )
+            .map_err(|e| data_api::chain::error::Error::BlockSource(FsBlockDbError::Fs(e)))?;
+            block_file
+                .write_all(&encoded)
+                .map_err(|e| data_api::chain::error::Error::BlockSource(FsBlockDbError::Fs(e)))?;
+            block_meta.push(meta);
+        }
+        self.write_block_metadata(&block_meta)
+            .await
+            .map_err(data_api::chain::error::Error::BlockSource)?;
+        Ok(())
     }
 
-    fn truncate<'life0, 'async_trait, WalletErrT>(
-        &'life0 self,
-        block_height: BlockHeight,
-    ) -> core::pin::Pin<
-        Box<
-            dyn core::future::Future<
-                    Output = Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>>,
-                > + core::marker::Send
-                + 'async_trait,
-        >,
-    >
-    where
-        WalletErrT: 'async_trait + Send,
-        'life0: 'async_trait,
-        Self: core::marker::Sync + 'async_trait,
-    {
-        todo!()
-    }
-
-    fn delete<'life0, 'async_trait, WalletErrT>(
-        &'life0 self,
+    async fn delete<WalletErrT>(
+        &self,
         range: ScanRange,
-    ) -> core::pin::Pin<
-        Box<
-            dyn core::future::Future<
-                    Output = Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>>,
-                > + core::marker::Send
-                + 'async_trait,
-        >,
-    >
-    where
-        WalletErrT: 'async_trait,
-        'life0: 'async_trait,
-        Self: 'async_trait,
-    {
-        todo!()
+    ) -> Result<(), data_api::chain::error::Error<WalletErrT, Self::Error>> {
+        let block_cache_root = Arc::clone(&self.blocks_dir);
+        let start = u32::from(range.block_range().start);
+        let end = u32::from(range.block_range().end);
+
+        let mut block_meta = Vec::with_capacity((end - start) as usize);
+        for height in start..end {
+            block_meta.push(
+                self.find_block(BlockHeight::from_u32(height))
+                    .await
+                    .map_err(data_api::chain::error::Error::BlockSource)?,
+            );
+        }
+
+        for block in block_meta.into_iter().flatten() {
+            tokio::fs::remove_file(block.block_file_path(block_cache_root.as_ref()))
+                .await
+                .map_err(|e| data_api::chain::error::Error::BlockSource(FsBlockDbError::Fs(e)))?;
+        }
+        Ok(())
     }
 }
 
