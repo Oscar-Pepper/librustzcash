@@ -1487,6 +1487,7 @@ impl BlockSource for BlockDb {
     }
 }
 
+#[async_trait::async_trait]
 impl BlockCache for BlockDb {
     fn get_tip_height<'life0, 'life1, 'async_trait, WalletErrT>(
         &'life0 self,
@@ -1510,27 +1511,21 @@ impl BlockCache for BlockDb {
         todo!()
     }
 
-    fn read<'life0, 'life1, 'async_trait, WalletErrT>(
-        &'life0 self,
-        _range: &'life1 ScanRange,
-    ) -> core::pin::Pin<
-        Box<
-            dyn core::future::Future<
-                    Output = Result<
-                        Vec<CompactBlock>,
-                        data_api::chain::error::Error<WalletErrT, Self::Error>,
-                    >,
-                > + core::marker::Send
-                + 'async_trait,
-        >,
-    >
-    where
-        WalletErrT: 'async_trait,
-        'life0: 'async_trait,
-        'life1: 'async_trait,
-        Self: 'async_trait,
-    {
-        todo!()
+    async fn read<WalletErrT>(
+        &self,
+        range: &ScanRange,
+    ) -> Result<Vec<CompactBlock>, data_api::chain::error::Error<WalletErrT, Self::Error>> {
+        let mut compact_blocks = vec![];
+        self.with_blocks(
+            Some(range.block_range().start),
+            Some(range.len()),
+            |block| {
+                compact_blocks.push(block);
+                Ok(())
+            },
+        )
+        .await?;
+        Ok(compact_blocks)
     }
 
     fn insert<'life0, 'async_trait, WalletErrT>(
