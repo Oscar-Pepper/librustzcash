@@ -387,198 +387,29 @@ pub(crate) fn mark_orchard_note_spent(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use incrementalmerkletree::{Hashable, Level};
-    use orchard::{
-        keys::{FullViewingKey, SpendingKey},
-        note_encryption::OrchardDomain,
-        tree::MerkleHashOrchard,
-    };
-    use shardtree::error::ShardTreeError;
-    use zcash_client_backend::{
-        data_api::{
-            chain::CommitmentTreeRoot, DecryptedTransaction, WalletCommitmentTrees, WalletSummary,
-        },
-        wallet::{Note, ReceivedNote},
-    };
-    use zcash_keys::{
-        address::{Address, UnifiedAddress},
-        keys::UnifiedSpendingKey,
-    };
-    use zcash_note_encryption::try_output_recovery_with_ovk;
-    use zcash_primitives::transaction::Transaction;
-    use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, ShieldedProtocol};
 
-    use super::select_spendable_orchard_notes;
-    use crate::{
-        error::SqliteClientError,
-        testing::{
-            self,
-            pool::{OutputRecoveryError, ShieldedPoolTester},
-            TestState,
-        },
-        wallet::{commitment_tree, sapling::tests::SaplingPoolTester},
-        ORCHARD_TABLES_PREFIX,
+    use zcash_client_backend::data_api::testing::{
+        orchard::OrchardPoolTester, sapling::SaplingPoolTester,
     };
 
-    pub(crate) struct OrchardPoolTester;
-    impl ShieldedPoolTester for OrchardPoolTester {
-        const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Orchard;
-        const TABLES_PREFIX: &'static str = ORCHARD_TABLES_PREFIX;
-        // const MERKLE_TREE_DEPTH: u8 = {orchard::NOTE_COMMITMENT_TREE_DEPTH as u8};
+    use crate::testing::{self};
 
-        type Sk = SpendingKey;
-        type Fvk = FullViewingKey;
-        type MerkleTreeHash = MerkleHashOrchard;
-        type Note = orchard::note::Note;
-
-        fn test_account_fvk<Cache>(st: &TestState<Cache>) -> Self::Fvk {
-            st.test_account_orchard().unwrap()
-        }
-
-        fn usk_to_sk(usk: &UnifiedSpendingKey) -> &Self::Sk {
-            usk.orchard()
-        }
-
-        fn sk(seed: &[u8]) -> Self::Sk {
-            let mut account = zip32::AccountId::ZERO;
-            loop {
-                if let Ok(sk) = SpendingKey::from_zip32_seed(seed, 1, account) {
-                    break sk;
-                }
-                account = account.next().unwrap();
-            }
-        }
-
-        fn sk_to_fvk(sk: &Self::Sk) -> Self::Fvk {
-            sk.into()
-        }
-
-        fn sk_default_address(sk: &Self::Sk) -> Address {
-            Self::fvk_default_address(&Self::sk_to_fvk(sk))
-        }
-
-        fn fvk_default_address(fvk: &Self::Fvk) -> Address {
-            UnifiedAddress::from_receivers(
-                Some(fvk.address_at(0u32, zip32::Scope::External)),
-                None,
-                None,
-            )
-            .unwrap()
-            .into()
-        }
-
-        fn fvks_equal(a: &Self::Fvk, b: &Self::Fvk) -> bool {
-            a == b
-        }
-
-        fn empty_tree_leaf() -> Self::MerkleTreeHash {
-            MerkleHashOrchard::empty_leaf()
-        }
-
-        fn empty_tree_root(level: Level) -> Self::MerkleTreeHash {
-            MerkleHashOrchard::empty_root(level)
-        }
-
-        fn put_subtree_roots<Cache>(
-            st: &mut TestState<Cache>,
-            start_index: u64,
-            roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
-        ) -> Result<(), ShardTreeError<commitment_tree::Error>> {
-            st.wallet_mut()
-                .put_orchard_subtree_roots(start_index, roots)
-        }
-
-        fn next_subtree_index(s: &WalletSummary<crate::AccountId>) -> u64 {
-            s.next_orchard_subtree_index()
-        }
-
-        fn select_spendable_notes<Cache>(
-            st: &TestState<Cache>,
-            account: crate::AccountId,
-            target_value: zcash_protocol::value::Zatoshis,
-            anchor_height: BlockHeight,
-            exclude: &[crate::ReceivedNoteId],
-        ) -> Result<Vec<ReceivedNote<crate::ReceivedNoteId, orchard::note::Note>>, SqliteClientError>
-        {
-            select_spendable_orchard_notes(
-                &st.wallet().conn,
-                &st.wallet().params,
-                account,
-                target_value,
-                anchor_height,
-                exclude,
-            )
-        }
-
-        fn decrypted_pool_outputs_count(
-            d_tx: &DecryptedTransaction<'_, crate::AccountId>,
-        ) -> usize {
-            d_tx.orchard_outputs().len()
-        }
-
-        fn with_decrypted_pool_memos(
-            d_tx: &DecryptedTransaction<'_, crate::AccountId>,
-            mut f: impl FnMut(&MemoBytes),
-        ) {
-            for output in d_tx.orchard_outputs() {
-                f(output.memo());
-            }
-        }
-
-        fn try_output_recovery<Cache>(
-            _: &TestState<Cache>,
-            _: BlockHeight,
-            tx: &Transaction,
-            fvk: &Self::Fvk,
-        ) -> Result<Option<(Note, Address, MemoBytes)>, OutputRecoveryError> {
-            for action in tx.orchard_bundle().unwrap().actions() {
-                // Find the output that decrypts with the external OVK
-                let result = try_output_recovery_with_ovk(
-                    &OrchardDomain::for_action(action),
-                    &fvk.to_ovk(zip32::Scope::External),
-                    action,
-                    action.cv_net(),
-                    &action.encrypted_note().out_ciphertext,
-                );
-
-                if result.is_some() {
-                    return Ok(result.map(|(note, addr, memo)| {
-                        (
-                            Note::Orchard(note),
-                            UnifiedAddress::from_receivers(Some(addr), None, None)
-                                .unwrap()
-                                .into(),
-                            MemoBytes::from_bytes(&memo).expect("correct length"),
-                        )
-                    }));
-                }
-            }
-
-            Ok(None)
-        }
-
-        fn received_note_count(
-            summary: &zcash_client_backend::data_api::chain::ScanSummary,
-        ) -> usize {
-            summary.received_orchard_note_count()
-        }
+    #[tokio::test]
+    async fn send_single_step_proposed_transfer() {
+        testing::pool::send_single_step_proposed_transfer::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn send_single_step_proposed_transfer() {
-        testing::pool::send_single_step_proposed_transfer::<OrchardPoolTester>()
-    }
-
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "transparent-inputs")]
-    fn send_multi_step_proposed_transfer() {
-        testing::pool::send_multi_step_proposed_transfer::<OrchardPoolTester>()
+    async fn send_multi_step_proposed_transfer() {
+        testing::pool::send_multi_step_proposed_transfer::<OrchardPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "transparent-inputs")]
-    fn proposal_fails_if_not_all_ephemeral_outputs_consumed() {
+    async fn proposal_fails_if_not_all_ephemeral_outputs_consumed() {
         testing::pool::proposal_fails_if_not_all_ephemeral_outputs_consumed::<OrchardPoolTester>()
+            .await
     }
 
     #[test]
@@ -593,89 +424,91 @@ pub(crate) mod tests {
         testing::pool::proposal_fails_with_no_blocks::<OrchardPoolTester>()
     }
 
-    #[test]
-    fn spend_fails_on_unverified_notes() {
-        testing::pool::spend_fails_on_unverified_notes::<OrchardPoolTester>()
+    #[tokio::test]
+    async fn spend_fails_on_unverified_notes() {
+        testing::pool::spend_fails_on_unverified_notes::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn spend_fails_on_locked_notes() {
-        testing::pool::spend_fails_on_locked_notes::<OrchardPoolTester>()
+    #[tokio::test]
+    async fn spend_fails_on_locked_notes() {
+        testing::pool::spend_fails_on_locked_notes::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn ovk_policy_prevents_recovery_from_chain() {
-        testing::pool::ovk_policy_prevents_recovery_from_chain::<OrchardPoolTester>()
+    #[tokio::test]
+    async fn ovk_policy_prevents_recovery_from_chain() {
+        testing::pool::ovk_policy_prevents_recovery_from_chain::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn spend_succeeds_to_t_addr_zero_change() {
-        testing::pool::spend_succeeds_to_t_addr_zero_change::<OrchardPoolTester>()
+    #[tokio::test]
+    async fn spend_succeeds_to_t_addr_zero_change() {
+        testing::pool::spend_succeeds_to_t_addr_zero_change::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn change_note_spends_succeed() {
-        testing::pool::change_note_spends_succeed::<OrchardPoolTester>()
+    #[tokio::test]
+    async fn change_note_spends_succeed() {
+        testing::pool::change_note_spends_succeed::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn external_address_change_spends_detected_in_restore_from_seed() {
+    #[tokio::test]
+    async fn external_address_change_spends_detected_in_restore_from_seed() {
         testing::pool::external_address_change_spends_detected_in_restore_from_seed::<
             OrchardPoolTester,
         >()
+        .await
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore] // FIXME: #1316 This requires support for dust outputs.
     #[cfg(not(feature = "expensive-tests"))]
-    fn zip317_spend() {
-        testing::pool::zip317_spend::<OrchardPoolTester>()
+    async fn zip317_spend() {
+        testing::pool::zip317_spend::<OrchardPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "transparent-inputs")]
-    fn shield_transparent() {
-        testing::pool::shield_transparent::<OrchardPoolTester>()
+    async fn shield_transparent() {
+        testing::pool::shield_transparent::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn birthday_in_anchor_shard() {
-        testing::pool::birthday_in_anchor_shard::<OrchardPoolTester>()
+    #[tokio::test]
+    async fn birthday_in_anchor_shard() {
+        testing::pool::birthday_in_anchor_shard::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn checkpoint_gaps() {
-        testing::pool::checkpoint_gaps::<OrchardPoolTester>()
+    #[tokio::test]
+    async fn checkpoint_gaps() {
+        testing::pool::checkpoint_gaps::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn scan_cached_blocks_detects_spends_out_of_order() {
-        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>()
+    #[tokio::test]
+    async fn scan_cached_blocks_detects_spends_out_of_order() {
+        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<OrchardPoolTester>().await
     }
 
-    #[test]
-    fn pool_crossing_required() {
-        testing::pool::pool_crossing_required::<OrchardPoolTester, SaplingPoolTester>()
+    #[tokio::test]
+    async fn pool_crossing_required() {
+        testing::pool::pool_crossing_required::<OrchardPoolTester, SaplingPoolTester>().await
     }
 
-    #[test]
-    fn fully_funded_fully_private() {
-        testing::pool::fully_funded_fully_private::<OrchardPoolTester, SaplingPoolTester>()
+    #[tokio::test]
+    async fn fully_funded_fully_private() {
+        testing::pool::fully_funded_fully_private::<OrchardPoolTester, SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "transparent-inputs")]
-    fn fully_funded_send_to_t() {
-        testing::pool::fully_funded_send_to_t::<OrchardPoolTester, SaplingPoolTester>()
+    async fn fully_funded_send_to_t() {
+        testing::pool::fully_funded_send_to_t::<OrchardPoolTester, SaplingPoolTester>().await
     }
 
-    #[test]
-    fn multi_pool_checkpoint() {
-        testing::pool::multi_pool_checkpoint::<OrchardPoolTester, SaplingPoolTester>()
+    #[tokio::test]
+    async fn multi_pool_checkpoint() {
+        testing::pool::multi_pool_checkpoint::<OrchardPoolTester, SaplingPoolTester>().await
     }
 
-    #[test]
-    fn multi_pool_checkpoints_with_pruning() {
+    #[tokio::test]
+    async fn multi_pool_checkpoints_with_pruning() {
         testing::pool::multi_pool_checkpoints_with_pruning::<OrchardPoolTester, SaplingPoolTester>()
+            .await
     }
 }

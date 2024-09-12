@@ -7,6 +7,15 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Changed
+- The `Account` trait now uses an associated type for its `AccountId`
+  type instead of a type parameter. This change allows for the simplification
+  of some type signatures.
+
+### Fixed
+- `zcash_client_backend::tor::grpc` now needs the `lightwalletd-tonic-tls-webpki-roots`
+  feature flag instead of `lightwalletd-tonic`, to fix compilation issues.
+
 ## [0.13.0] - 2024-08-20
 
 `zcash_client_backend` now supports TEX (transparent-source-only) addresses as specified
@@ -131,6 +140,15 @@ funds to those addresses. See [ZIP 320](https://zips.z.cash/zip-0320) for detail
 - `zcash_client_backend::wallet::WalletTransparentOutput::from_parts`
   now takes its height argument as `Option<BlockHeight>` rather than
   `BlockHeight`.
+- zcash_client_backend::data_api::chain:
+  - `BlockSource` added Send + Sync trait bounds
+  - `BlockSource::with_blocks` changed to async fn
+  - Changes to `BlockCache` trait:
+    - removed `sync` feature flag so it can be used in `scan_cached_blocks`
+    - all trait methods now return `zcash_client_backend::data_api::chain::error::Error`
+      so implementations may call `BlockSource::with_blocks` and propagate errors correctly.
+  - `scan_cached_blocks` now takes a block cache and a scan range for scanning.
+        
 
 ### Removed
 - `zcash_client_backend::data_api`:

@@ -400,191 +400,29 @@ pub(crate) fn put_received_note<T: ReceivedSaplingOutput>(
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use incrementalmerkletree::{Hashable, Level};
-    use shardtree::error::ShardTreeError;
-    use zcash_proofs::prover::LocalTxProver;
+    use zcash_client_backend::data_api::testing::sapling::SaplingPoolTester;
 
-    use sapling::{
-        self,
-        note_encryption::try_sapling_output_recovery,
-        prover::{OutputProver, SpendProver},
-        zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
-    };
-    use zcash_primitives::{
-        consensus::BlockHeight,
-        memo::MemoBytes,
-        transaction::{
-            components::{amount::NonNegativeAmount, sapling::zip212_enforcement},
-            Transaction,
-        },
-        zip32::Scope,
-    };
+    use crate::testing;
 
-    use zcash_client_backend::{
-        address::Address,
-        data_api::{
-            chain::CommitmentTreeRoot, DecryptedTransaction, WalletCommitmentTrees, WalletSummary,
-        },
-        keys::UnifiedSpendingKey,
-        wallet::{Note, ReceivedNote},
-        ShieldedProtocol,
-    };
+    #[cfg(feature = "orchard")]
+    use zcash_client_backend::data_api::testing::orchard::OrchardPoolTester;
 
-    use crate::{
-        error::SqliteClientError,
-        testing::{
-            self,
-            pool::{OutputRecoveryError, ShieldedPoolTester},
-            TestState,
-        },
-        wallet::{commitment_tree, sapling::select_spendable_sapling_notes},
-        AccountId, ReceivedNoteId, SAPLING_TABLES_PREFIX,
-    };
-
-    pub(crate) struct SaplingPoolTester;
-    impl ShieldedPoolTester for SaplingPoolTester {
-        const SHIELDED_PROTOCOL: ShieldedProtocol = ShieldedProtocol::Sapling;
-        const TABLES_PREFIX: &'static str = SAPLING_TABLES_PREFIX;
-        // const MERKLE_TREE_DEPTH: u8 = sapling::NOTE_COMMITMENT_TREE_DEPTH;
-
-        type Sk = ExtendedSpendingKey;
-        type Fvk = DiversifiableFullViewingKey;
-        type MerkleTreeHash = sapling::Node;
-        type Note = sapling::Note;
-
-        fn test_account_fvk<Cache>(st: &TestState<Cache>) -> Self::Fvk {
-            st.test_account_sapling().unwrap()
-        }
-
-        fn usk_to_sk(usk: &UnifiedSpendingKey) -> &Self::Sk {
-            usk.sapling()
-        }
-
-        fn sk(seed: &[u8]) -> Self::Sk {
-            ExtendedSpendingKey::master(seed)
-        }
-
-        fn sk_to_fvk(sk: &Self::Sk) -> Self::Fvk {
-            sk.to_diversifiable_full_viewing_key()
-        }
-
-        fn sk_default_address(sk: &Self::Sk) -> Address {
-            sk.default_address().1.into()
-        }
-
-        fn fvk_default_address(fvk: &Self::Fvk) -> Address {
-            fvk.default_address().1.into()
-        }
-
-        fn fvks_equal(a: &Self::Fvk, b: &Self::Fvk) -> bool {
-            a.to_bytes() == b.to_bytes()
-        }
-
-        fn empty_tree_leaf() -> Self::MerkleTreeHash {
-            sapling::Node::empty_leaf()
-        }
-
-        fn empty_tree_root(level: Level) -> Self::MerkleTreeHash {
-            sapling::Node::empty_root(level)
-        }
-
-        fn put_subtree_roots<Cache>(
-            st: &mut TestState<Cache>,
-            start_index: u64,
-            roots: &[CommitmentTreeRoot<Self::MerkleTreeHash>],
-        ) -> Result<(), ShardTreeError<commitment_tree::Error>> {
-            st.wallet_mut()
-                .put_sapling_subtree_roots(start_index, roots)
-        }
-
-        fn next_subtree_index(s: &WalletSummary<AccountId>) -> u64 {
-            s.next_sapling_subtree_index()
-        }
-
-        fn select_spendable_notes<Cache>(
-            st: &TestState<Cache>,
-            account: AccountId,
-            target_value: NonNegativeAmount,
-            anchor_height: BlockHeight,
-            exclude: &[ReceivedNoteId],
-        ) -> Result<Vec<ReceivedNote<ReceivedNoteId, Self::Note>>, SqliteClientError> {
-            select_spendable_sapling_notes(
-                &st.wallet().conn,
-                &st.wallet().params,
-                account,
-                target_value,
-                anchor_height,
-                exclude,
-            )
-        }
-
-        fn decrypted_pool_outputs_count(d_tx: &DecryptedTransaction<'_, AccountId>) -> usize {
-            d_tx.sapling_outputs().len()
-        }
-
-        fn with_decrypted_pool_memos(
-            d_tx: &DecryptedTransaction<'_, AccountId>,
-            mut f: impl FnMut(&MemoBytes),
-        ) {
-            for output in d_tx.sapling_outputs() {
-                f(output.memo());
-            }
-        }
-
-        fn try_output_recovery<Cache>(
-            st: &TestState<Cache>,
-            height: BlockHeight,
-            tx: &Transaction,
-            fvk: &Self::Fvk,
-        ) -> Result<Option<(Note, Address, MemoBytes)>, OutputRecoveryError> {
-            for output in tx.sapling_bundle().unwrap().shielded_outputs() {
-                // Find the output that decrypts with the external OVK
-                let result = try_sapling_output_recovery(
-                    &fvk.to_ovk(Scope::External),
-                    output,
-                    zip212_enforcement(&st.network(), height),
-                );
-
-                if result.is_some() {
-                    return Ok(result.map(|(note, addr, memo)| {
-                        (
-                            Note::Sapling(note),
-                            addr.into(),
-                            MemoBytes::from_bytes(&memo).expect("correct length"),
-                        )
-                    }));
-                }
-            }
-
-            Ok(None)
-        }
-
-        fn received_note_count(
-            summary: &zcash_client_backend::data_api::chain::ScanSummary,
-        ) -> usize {
-            summary.received_sapling_note_count()
-        }
+    #[tokio::test]
+    async fn send_single_step_proposed_transfer() {
+        testing::pool::send_single_step_proposed_transfer::<SaplingPoolTester>().await
     }
 
-    pub(crate) fn test_prover() -> impl SpendProver + OutputProver {
-        LocalTxProver::bundled()
-    }
-
-    #[test]
-    fn send_single_step_proposed_transfer() {
-        testing::pool::send_single_step_proposed_transfer::<SaplingPoolTester>()
-    }
-
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "transparent-inputs")]
-    fn send_multi_step_proposed_transfer() {
-        testing::pool::send_multi_step_proposed_transfer::<SaplingPoolTester>()
+    async fn send_multi_step_proposed_transfer() {
+        testing::pool::send_multi_step_proposed_transfer::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "transparent-inputs")]
-    fn proposal_fails_if_not_all_ephemeral_outputs_consumed() {
+    async fn proposal_fails_if_not_all_ephemeral_outputs_consumed() {
         testing::pool::proposal_fails_if_not_all_ephemeral_outputs_consumed::<SaplingPoolTester>()
+            .await
     }
 
     #[test]
@@ -599,103 +437,95 @@ pub(crate) mod tests {
         testing::pool::proposal_fails_with_no_blocks::<SaplingPoolTester>()
     }
 
-    #[test]
-    fn spend_fails_on_unverified_notes() {
-        testing::pool::spend_fails_on_unverified_notes::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn spend_fails_on_unverified_notes() {
+        testing::pool::spend_fails_on_unverified_notes::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn spend_fails_on_locked_notes() {
-        testing::pool::spend_fails_on_locked_notes::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn spend_fails_on_locked_notes() {
+        testing::pool::spend_fails_on_locked_notes::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn ovk_policy_prevents_recovery_from_chain() {
-        testing::pool::ovk_policy_prevents_recovery_from_chain::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn ovk_policy_prevents_recovery_from_chain() {
+        testing::pool::ovk_policy_prevents_recovery_from_chain::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn spend_succeeds_to_t_addr_zero_change() {
-        testing::pool::spend_succeeds_to_t_addr_zero_change::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn spend_succeeds_to_t_addr_zero_change() {
+        testing::pool::spend_succeeds_to_t_addr_zero_change::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn change_note_spends_succeed() {
-        testing::pool::change_note_spends_succeed::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn change_note_spends_succeed() {
+        testing::pool::change_note_spends_succeed::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn external_address_change_spends_detected_in_restore_from_seed() {
+    #[tokio::test]
+    async fn external_address_change_spends_detected_in_restore_from_seed() {
         testing::pool::external_address_change_spends_detected_in_restore_from_seed::<
             SaplingPoolTester,
         >()
+        .await
     }
 
-    #[test]
+    #[tokio::test]
     #[ignore] // FIXME: #1316 This requires support for dust outputs.
     #[cfg(not(feature = "expensive-tests"))]
-    fn zip317_spend() {
-        testing::pool::zip317_spend::<SaplingPoolTester>()
+    async fn zip317_spend() {
+        testing::pool::zip317_spend::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "transparent-inputs")]
-    fn shield_transparent() {
-        testing::pool::shield_transparent::<SaplingPoolTester>()
+    async fn shield_transparent() {
+        testing::pool::shield_transparent::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn birthday_in_anchor_shard() {
-        testing::pool::birthday_in_anchor_shard::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn birthday_in_anchor_shard() {
+        testing::pool::birthday_in_anchor_shard::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn checkpoint_gaps() {
-        testing::pool::checkpoint_gaps::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn checkpoint_gaps() {
+        testing::pool::checkpoint_gaps::<SaplingPoolTester>().await
     }
 
-    #[test]
-    fn scan_cached_blocks_detects_spends_out_of_order() {
-        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>()
+    #[tokio::test]
+    async fn scan_cached_blocks_detects_spends_out_of_order() {
+        testing::pool::scan_cached_blocks_detects_spends_out_of_order::<SaplingPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn pool_crossing_required() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
-        testing::pool::pool_crossing_required::<SaplingPoolTester, OrchardPoolTester>()
+    async fn pool_crossing_required() {
+        testing::pool::pool_crossing_required::<SaplingPoolTester, OrchardPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn fully_funded_fully_private() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
-        testing::pool::fully_funded_fully_private::<SaplingPoolTester, OrchardPoolTester>()
+    async fn fully_funded_fully_private() {
+        testing::pool::fully_funded_fully_private::<SaplingPoolTester, OrchardPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(all(feature = "orchard", feature = "transparent-inputs"))]
-    fn fully_funded_send_to_t() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
-        testing::pool::fully_funded_send_to_t::<SaplingPoolTester, OrchardPoolTester>()
+    async fn fully_funded_send_to_t() {
+        testing::pool::fully_funded_send_to_t::<SaplingPoolTester, OrchardPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn multi_pool_checkpoint() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
-        testing::pool::multi_pool_checkpoint::<SaplingPoolTester, OrchardPoolTester>()
+    async fn multi_pool_checkpoint() {
+        testing::pool::multi_pool_checkpoint::<SaplingPoolTester, OrchardPoolTester>().await
     }
 
-    #[test]
+    #[tokio::test]
     #[cfg(feature = "orchard")]
-    fn multi_pool_checkpoints_with_pruning() {
-        use crate::wallet::orchard::tests::OrchardPoolTester;
-
+    async fn multi_pool_checkpoints_with_pruning() {
         testing::pool::multi_pool_checkpoints_with_pruning::<SaplingPoolTester, OrchardPoolTester>()
+            .await
     }
 }
