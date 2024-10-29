@@ -38,7 +38,7 @@ pub struct DecryptedOutput<Note, AccountId> {
     transfer_type: TransferType,
 }
 
-impl<Note, AccountId: Copy> DecryptedOutput<Note, AccountId> {
+impl<Note, AccountId> DecryptedOutput<Note, AccountId> {
     pub fn new(
         index: usize,
         note: Note,
@@ -182,7 +182,6 @@ pub fn decrypt_transaction<'a, P: consensus::Parameters, AccountId: Copy>(
                         .enumerate()
                         .flat_map(move |(index, action)| {
                             let domain = OrchardDomain::for_action(action);
-                            let account = account;
                             try_note_decryption(&domain, &ivk_external, action)
                                 .map(|ret| (ret, TransferType::Incoming))
                                 .or_else(|| {

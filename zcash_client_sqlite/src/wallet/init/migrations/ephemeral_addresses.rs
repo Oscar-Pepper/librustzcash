@@ -1,9 +1,7 @@
 //! The migration that records ephemeral addresses for each account.
 use std::collections::HashSet;
 
-use rusqlite;
-use schemer;
-use schemer_rusqlite::RusqliteMigration;
+use schemerz_rusqlite::RusqliteMigration;
 use uuid::Uuid;
 use zcash_protocol::consensus;
 
@@ -23,7 +21,7 @@ pub(super) struct Migration<P> {
     pub(super) params: P,
 }
 
-impl<P> schemer::Migration for Migration<P> {
+impl<P> schemerz::Migration<Uuid> for Migration<P> {
     fn id(&self) -> Uuid {
         MIGRATION_ID
     }
@@ -99,13 +97,15 @@ mod tests {
     };
 
     #[cfg(feature = "transparent-inputs")]
-    use crate::{
-        error::SqliteClientError,
-        wallet::{
-            self, account_kind_code, init::init_wallet_db_internal, transparent::ephemeral,
-            GAP_LIMIT,
+    use {
+        crate::{
+            error::SqliteClientError,
+            wallet::{
+                self, account_kind_code, init::init_wallet_db_internal, transparent::ephemeral,
+            },
+            AccountId, WalletDb,
         },
-        AccountId, WalletDb,
+        zcash_client_backend::data_api::GAP_LIMIT,
     };
 
     /// This is a minimized copy of [`wallet::create_account`] as of the time of the

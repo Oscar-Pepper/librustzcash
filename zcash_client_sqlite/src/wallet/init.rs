@@ -4,8 +4,8 @@ use std::fmt;
 use std::rc::Rc;
 
 use regex::Regex;
-use schemer::{Migrator, MigratorError};
-use schemer_rusqlite::RusqliteAdapter;
+use schemerz::{Migrator, MigratorError};
+use schemerz_rusqlite::RusqliteAdapter;
 use secrecy::SecretVec;
 use shardtree::error::ShardTreeError;
 use uuid::Uuid;
@@ -197,7 +197,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
         SqliteClientError::TableNotEmpty => unreachable!("wallet already initialized"),
         SqliteClientError::BlockConflict(_)
         | SqliteClientError::NonSequentialBlocks
-        | SqliteClientError::RequestedRewindInvalid(_, _)
+        | SqliteClientError::RequestedRewindInvalid { .. }
         | SqliteClientError::KeyDerivationError(_)
         | SqliteClientError::AccountIdDiscontinuity
         | SqliteClientError::AccountIdOutOfRange
@@ -240,7 +240,7 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// In order to correctly apply migrations to accounts derived from a seed, sometimes the
 /// optional `seed` argument is required. This function should first be invoked with
 /// `seed` set to `None`; if a pending migration requires the seed, the function returns
-/// `Err(schemer::MigratorError::Migration { error: WalletMigrationError::SeedRequired, .. })`.
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedRequired, .. })`.
 /// The caller can then re-call this function with the necessary seed.
 ///
 /// > Note that currently only one seed can be provided; as such, wallets containing
@@ -251,8 +251,8 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 /// _relevance_: if any account in the wallet for which [`Account::source`] is
 /// [`AccountSource::Derived`] can be derived from the given seed, the seed is relevant to
 /// the wallet. If the given seed is not relevant, the function returns
-/// `Err(schemer::MigratorError::Migration { error: WalletMigrationError::SeedNotRelevant, .. })`
-/// or `Err(schemer::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
+/// `Err(schemerz::MigratorError::Migration { error: WalletMigrationError::SeedNotRelevant, .. })`
+/// or `Err(schemerz::MigratorError::Adapter(WalletMigrationError::SeedNotRelevant))`.
 ///
 /// We do not check whether the seed is relevant to any imported account, because that
 /// would require brute-forcing the ZIP 32 account index space. Consequentially, imported
@@ -308,16 +308,16 @@ fn sqlite_client_error_to_wallet_migration_error(e: SqliteClientError) -> Wallet
 pub fn init_wallet_db<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<rusqlite::Connection, P>,
     seed: Option<SecretVec<u8>>,
-) -> Result<(), MigratorError<WalletMigrationError>> {
+) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
     init_wallet_db_internal(wdb, seed, &[], true)
 }
 
-fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
+pub(crate) fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
     wdb: &mut WalletDb<rusqlite::Connection, P>,
     seed: Option<SecretVec<u8>>,
     target_migrations: &[Uuid],
     verify_seed_relevance: bool,
-) -> Result<(), MigratorError<WalletMigrationError>> {
+) -> Result<(), MigratorError<Uuid, WalletMigrationError>> {
     let seed = seed.map(Rc::new);
 
     verify_sqlite_version_compatibility(&wdb.conn).map_err(MigratorError::Adapter)?;
@@ -335,7 +335,7 @@ fn init_wallet_db_internal<P: consensus::Parameters + 'static>(
 
     let mut migrator = Migrator::new(adapter);
     migrator
-        .register_multiple(migrations::all_migrations(&wdb.params, seed.clone()))
+        .register_multiple(migrations::all_migrations(&wdb.params, seed.clone()).into_iter())
         .expect("Wallet migration registration should have been successful.");
     if target_migrations.is_empty() {
         migrator.up(None)?;
@@ -409,7 +409,6 @@ fn verify_sqlite_version_compatibility(
 }
 
 #[cfg(test)]
-#[allow(deprecated)]
 mod tests {
     use rusqlite::{self, named_params, Connection, ToSql};
     use secrecy::Secret;
@@ -418,6 +417,7 @@ mod tests {
 
     use zcash_client_backend::{
         address::Address,
+        data_api::testing::TestBuilder,
         encoding::{encode_extended_full_viewing_key, encode_payment_address},
         keys::{sapling, UnifiedAddressRequest, UnifiedFullViewingKey, UnifiedSpendingKey},
     };
@@ -429,7 +429,7 @@ mod tests {
         zip32::AccountId,
     };
 
-    use crate::{testing::TestBuilder, wallet::db, WalletDb, UA_TRANSPARENT};
+    use crate::{testing::db::TestDbFactory, wallet::db, WalletDb, UA_TRANSPARENT};
 
     use super::init_wallet_db;
 
@@ -453,7 +453,9 @@ mod tests {
 
     #[test]
     fn verify_schema() {
-        let st = TestBuilder::new().build();
+        let st = TestBuilder::new()
+            .with_data_store_factory(TestDbFactory::default())
+            .build();
 
         use regex::Regex;
         let re = Regex::new(r"\s+").unwrap();
@@ -477,7 +479,7 @@ mod tests {
             db::TABLE_SAPLING_TREE_CHECKPOINTS,
             db::TABLE_SAPLING_TREE_SHARDS,
             db::TABLE_SCAN_QUEUE,
-            db::TABLE_SCHEMER_MIGRATIONS,
+            db::TABLE_SCHEMERZ_MIGRATIONS,
             db::TABLE_SENT_NOTES,
             db::TABLE_SQLITE_SEQUENCE,
             db::TABLE_TRANSACTIONS,
@@ -489,7 +491,7 @@ mod tests {
             db::TABLE_TX_RETRIEVAL_QUEUE,
         ];
 
-        let rows = describe_tables(&st.wallet().conn).unwrap();
+        let rows = describe_tables(&st.wallet().db().conn).unwrap();
         assert_eq!(rows.len(), expected_tables.len());
         for (actual, expected) in rows.iter().zip(expected_tables.iter()) {
             assert_eq!(
@@ -515,6 +517,7 @@ mod tests {
         ];
         let mut indices_query = st
             .wallet()
+            .db()
             .conn
             .prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND sql != '' ORDER BY tbl_name, name")
             .unwrap();
@@ -530,12 +533,12 @@ mod tests {
         }
 
         let expected_views = vec![
-            db::view_orchard_shard_scan_ranges(&st.network()),
+            db::view_orchard_shard_scan_ranges(st.network()),
             db::view_orchard_shard_unscanned_ranges(),
             db::VIEW_ORCHARD_SHARDS_SCAN_STATE.to_owned(),
             db::VIEW_RECEIVED_OUTPUT_SPENDS.to_owned(),
             db::VIEW_RECEIVED_OUTPUTS.to_owned(),
-            db::view_sapling_shard_scan_ranges(&st.network()),
+            db::view_sapling_shard_scan_ranges(st.network()),
             db::view_sapling_shard_unscanned_ranges(),
             db::VIEW_SAPLING_SHARDS_SCAN_STATE.to_owned(),
             db::VIEW_TRANSACTIONS.to_owned(),
@@ -544,6 +547,7 @@ mod tests {
 
         let mut views_query = st
             .wallet()
+            .db()
             .conn
             .prepare("SELECT sql FROM sqlite_schema WHERE type = 'view' ORDER BY tbl_name")
             .unwrap();
@@ -671,6 +675,7 @@ mod tests {
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
         let secret_key = sapling::spending_key(&seed, db_data.params.coin_type(), account);
+        #[allow(deprecated)]
         let extfvk = secret_key.to_extended_full_viewing_key();
 
         init_0_3_0(&mut db_data, &extfvk, account).unwrap();
@@ -842,6 +847,7 @@ mod tests {
         let seed = [0xab; 32];
         let account = AccountId::ZERO;
         let secret_key = sapling::spending_key(&seed, db_data.params.coin_type(), account);
+        #[allow(deprecated)]
         let extfvk = secret_key.to_extended_full_viewing_key();
 
         init_autoshielding(&mut db_data, &extfvk, account).unwrap();
@@ -1064,7 +1070,7 @@ mod tests {
         );
         assert_matches!(
             init_wallet_db(&mut db_data, Some(Secret::new(other_seed.to_vec()))),
-            Err(schemer::MigratorError::Adapter(
+            Err(schemerz::MigratorError::Adapter(
                 WalletMigrationError::SeedNotRelevant
             ))
         );

@@ -1,6 +1,7 @@
 use std::convert::{Infallible, TryFrom};
 use std::error;
 use std::iter::Sum;
+use std::num::NonZeroU64;
 use std::ops::{Add, Mul, Neg, Sub};
 
 use memuse::DynamicUsage;
@@ -192,14 +193,14 @@ impl Sub<ZatBalance> for Option<ZatBalance> {
 }
 
 impl Sum<ZatBalance> for Option<ZatBalance> {
-    fn sum<I: Iterator<Item = ZatBalance>>(iter: I) -> Self {
-        iter.fold(Some(ZatBalance::zero()), |acc, a| acc? + a)
+    fn sum<I: Iterator<Item = ZatBalance>>(mut iter: I) -> Self {
+        iter.try_fold(ZatBalance::zero(), |acc, a| acc + a)
     }
 }
 
 impl<'a> Sum<&'a ZatBalance> for Option<ZatBalance> {
-    fn sum<I: Iterator<Item = &'a ZatBalance>>(iter: I) -> Self {
-        iter.fold(Some(ZatBalance::zero()), |acc, a| acc? + *a)
+    fn sum<I: Iterator<Item = &'a ZatBalance>>(mut iter: I) -> Self {
+        iter.try_fold(ZatBalance::zero(), |acc, a| acc + *a)
     }
 }
 
@@ -228,6 +229,24 @@ impl Mul<usize> for ZatBalance {
 /// range of `{0..MAX_MONEY}` (where `MAX_MONEY` = 21,000,000 × 10⁸ zatoshis).
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, Eq, Ord)]
 pub struct Zatoshis(u64);
+
+/// A struct that provides both the quotient and remainder of a division operation.
+pub struct QuotRem<A> {
+    quotient: A,
+    remainder: A,
+}
+
+impl<A> QuotRem<A> {
+    /// Returns the quotient portion of the value.
+    pub fn quotient(&self) -> &A {
+        &self.quotient
+    }
+
+    /// Returns the remainder portion of the value.
+    pub fn remainder(&self) -> &A {
+        &self.remainder
+    }
+}
 
 impl Zatoshis {
     /// Returns the identity `Zatoshis`
@@ -297,6 +316,15 @@ impl Zatoshis {
     /// Returns whether or not this `Zatoshis` is positive.
     pub fn is_positive(&self) -> bool {
         self > &Zatoshis::ZERO
+    }
+
+    /// Divides this `Zatoshis` value by the given divisor and returns the quotient and remainder.
+    pub fn div_with_remainder(&self, divisor: NonZeroU64) -> QuotRem<Zatoshis> {
+        let divisor = u64::from(divisor);
+        QuotRem {
+            quotient: Zatoshis(self.0 / divisor),
+            remainder: Zatoshis(self.0 % divisor),
+        }
     }
 }
 
@@ -375,14 +403,14 @@ impl Mul<usize> for Zatoshis {
 }
 
 impl Sum<Zatoshis> for Option<Zatoshis> {
-    fn sum<I: Iterator<Item = Zatoshis>>(iter: I) -> Self {
-        iter.fold(Some(Zatoshis::ZERO), |acc, a| acc? + a)
+    fn sum<I: Iterator<Item = Zatoshis>>(mut iter: I) -> Self {
+        iter.try_fold(Zatoshis::ZERO, |acc, a| acc + a)
     }
 }
 
 impl<'a> Sum<&'a Zatoshis> for Option<Zatoshis> {
-    fn sum<I: Iterator<Item = &'a Zatoshis>>(iter: I) -> Self {
-        iter.fold(Some(Zatoshis::ZERO), |acc, a| acc? + *a)
+    fn sum<I: Iterator<Item = &'a Zatoshis>>(mut iter: I) -> Self {
+        iter.try_fold(Zatoshis::ZERO, |acc, a| acc + *a)
     }
 }
 

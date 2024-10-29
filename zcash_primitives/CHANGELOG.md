@@ -7,10 +7,59 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- A new feature flag, `non-standard-fees`, has been added. This flag is now
+  required in order to make use of any types or methods that enable non-standard
+  fee calculation.
+
+### Changed
+- MSRV is now 1.77.0.
+- `zcash_primitives::transaction::fees`:
+  - The `fixed` module has been moved behind the `non-standard-fees` feature
+    flag. Using a fixed fee may result in a transaction that cannot be mined on
+    the current Zcash network. To calculate the ZIP 317 fee, use
+    `zip317::FeeRule::standard()`.
+  - `zip317::FeeRule::non_standard` has been moved behind the `non-standard-fees`
+    feature flag. Using a non-standard fee may result in a transaction that cannot
+    be mined on the current `Zcash` network.
+
+### Deprecated
+- `zcash_primitives::transaction::fees`:
+  - `StandardFeeRule` has been deprecated. It was never used within `zcash_primitives`
+    and should have been a member of `zcash_client_backend::fees` instead.
+
+### Removed
+- `zcash_primitives::transaction::fees`:
+  - `StandardFeeRule` itself has been removed; it was not used in this crate.
+    Its use in `zcash_client_backend` has been replaced with
+    `zcash_client_backend::fees::StandardFeeRule`.
+  - `fixed::FeeRule::standard`. This constructor was misleadingly named: using a
+    fixed fee does not conform to any current Zcash standard. To calculate the
+    ZIP 317 fee, use `zip317::FeeRule::standard()`. To preserve the current
+    behaviour, use `fixed::FeeRule::non_standard(zip317::MINIMUM_FEE)`,
+    but note that this is likely to result in transactions that cannot be mined.
+
+## [0.19.0] - 2024-10-02
+
+### Changed
+- Migrated to `zcash_address 0.6`.
+
+### Fixed
+- The previous release did not bump `zcash_address` and ended up depending on
+  multiple versions of `zcash_protocol`, which didn't cause a code conflict but
+  results in two different consensus protocol states being present in the
+  dependency tree.
+
+## [0.18.0] - 2024-10-02
+
+### Changed
+- Update dependencies to `incrementalmerkletree 0.7`, `orchard 0.10`,
+  `sapling-crypto 0.3`, `zcash_protocol 0.4`.
+
 ## [0.17.0] - 2024-08-26
 
 ### Changed
-- Update dependencies to `zcash_protocol 0.3.0`, `zcash_address 0.5.0`
+- Update dependencies to `zcash_protocol 0.3`, `zcash_address 0.5`.
 
 ## [0.16.0] - 2024-08-19
 

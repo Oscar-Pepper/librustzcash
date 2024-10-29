@@ -7,6 +7,160 @@ and this library adheres to Rust's notion of
 
 ## [Unreleased]
 
+### Added
+- `zcash_client_backend::data_api`:
+  - `Progress`
+  - `WalletSummary::progress`
+  - `WalletMeta`
+  - `chain::truncate_block_cache` (behind the `sync` feature flag).
+  - `impl Default for wallet::input_selection::GreedyInputSelector`
+- `zcash_client_backend::fees`
+  - `SplitPolicy`
+  - `StandardFeeRule` has been moved here from `zcash_primitives::fees`. Relative
+    to that type, the deprecated `PreZip313` and `Zip313` variants have been
+    removed.
+  - `zip317::{MultiOutputChangeStrategy, Zip317FeeRule}`
+  - `standard::MultiOutputChangeStrategy`
+- A new feature flag, `non-standard-fees`, has been added. This flag is now
+  required in order to make use of any types or methods that enable non-standard
+  fee calculation.
+- `zcash_client_backend::tor::http::cryptex`:
+  - `LocalExchange`, a variant of the `Exchange` trait without `Send` bounds.
+  - `DynExchange`
+  - `DynLocalExchange`
+
+### Changed
+- MSRV is now 1.77.0.
+- Migrated to `arti-client 0.23`.
+- `zcash_client_backend::data_api`:
+  - `InputSource` has an added method `get_wallet_metadata`
+  - `error::Error` has additional variant `Error::Change`. This necessitates
+    the addition of two type parameters to the `Error` type,
+    `ChangeErrT` and `NoteRefT`.
+  - The following methods each now take an additional `change_strategy`
+    argument, along with an associated `ChangeT` type parameter:
+    - `wallet::spend`
+    - `wallet::propose_transfer`
+    - `wallet::propose_shielding`. This method also now takes an additional
+      `to_account` argument.
+    - `wallet::shield_transparent_funds`. This method also now takes an
+      additional `to_account` argument.
+  - `wallet::input_selection::InputSelectionError` now has an additional `Change`
+    variant. This necessitates the addition of two type parameters.
+  - `wallet::input_selection::InputSelector::propose_transaction` takes an
+    additional `change_strategy` argument, along with an associated `ChangeT`
+    type parameter.
+  - The `wallet::input_selection::InputSelector::FeeRule` associated type has
+    been removed. The fee rule is now part of the change strategy passed to
+    `propose_transaction`.
+  - `wallet::input_selection::ShieldingSelector::propose_shielding` takes an
+    additional `change_strategy` argument, along with an associated `ChangeT`
+    type parameter. In addition, it also takes a new `to_account` argument
+    that identifies the destination account for the shielded notes.
+  - The `wallet::input_selection::ShieldingSelector::FeeRule` associated type
+    has been removed. The fee rule is now part of the change strategy passed to
+    `propose_shielding`.
+  - The `Change` variant of `wallet::input_selection::GreedyInputSelectorError`
+    has been removed, along with the additional type parameters it necessitated.
+  - The arguments to `wallet::input_selection::GreedyInputSelector::new` have
+    changed.
+- `zcash_client_backend::fees`:
+  - `ChangeStrategy` has changed. It has two new associated types, `MetaSource`
+    and `WalletMeta`, and its `FeeRule` associated type now has an additional
+    `Clone` bound. In addition, it defines a new `fetch_wallet_meta` method, and
+    the arguments to `compute_balance` have changed.
+  - `zip317::SingleOutputChangeStrategy` has been made polymorphic in the fee
+    rule type, and takes an additional type parameter as a consequence.
+  - The following methods now take an additional `DustOutputPolicy` argument,
+    and carry an additional type parameter:
+    - `fixed::SingleOutputChangeStrategy::new`
+    - `standard::SingleOutputChangeStrategy::new`
+    - `zip317::SingleOutputChangeStrategy::new`
+- `zcash_client_backend::proto::ProposalDecodingError` has modified variants.
+  `ProposalDecodingError::FeeRuleNotSpecified` has been removed, and
+  `ProposalDecodingError::FeeRuleNotSupported` has been added to replace it.
+- `zcash_client_backend::data_api::fees::fixed` is now available only via the
+  use of the `non-standard-fees` feature flag.
+- zcash_client_backend::data_api::chain:
+  - `BlockSource` added Send + Sync trait bounds
+  - `BlockSource::with_blocks` changed to async fn
+  - Changes to `BlockCache` trait:
+    - removed `sync` feature flag so it can be used in `scan_cached_blocks`
+    - all trait methods now return `zcash_client_backend::data_api::chain::error::Error`
+      so implementations may call `BlockSource::with_blocks` and propagate errors correctly.
+  - `scan_cached_blocks` now takes a block cache and a scan range for scanning.
+- `zcash_client_backend::tor::http::cryptex`:
+  - The `Exchange` trait is no longer object-safe. Replace any existing uses of
+    `dyn Exchange` with `DynExchange`.
+
+### Removed
+- `zcash_client_backend::data_api`:
+  - `WalletSummary::scan_progress` and `WalletSummary::recovery_progress` have
+    been removed. Use `WalletSummary::progress` instead.
+  - `chain::BlockCache::truncate` (use `chain::truncate_block_cache` instead).
+  - `testing::input_selector` use explicit `InputSelector` constructors
+    directly instead.
+  - The deprecated `wallet::create_spend_to_address` and `wallet::spend`
+    methods have been removed. Use `propose_transfer` and
+    `create_proposed_transaction` instead.
+- `zcash_client_backend::fees`:
+  - `impl From<BalanceError> for ChangeError<...>`
+
+## [0.14.0] - 2024-10-04
+
+### Added
+- `zcash_client_backend::data_api`:
+  - `GAP_LIMIT`
+  - `WalletSummary::recovery_progress`
+  - `SpendableNotes::{take_sapling, take_orchard}`
+  - Tests and testing infrastructure have been migrated from the
+    `zcash_client_sqlite` internal tests to the `testing` module, and have been
+    generalized so that they may be used for testing arbitrary implementations
+    of the `zcash_client_backend::data_api` interfaces. The following have been
+    added under the `test-dependencies` feature flag as part of this migration:
+    - `WalletTest`
+    - `testing::AddressType`
+    - `testing::CachedBlock`
+    - `testing::DataStoreFactory`
+    - `testing::FakeCompactOutput`
+    - `testing::InitialChainState`
+    - `testing::NoteCommitments`
+    - `testing::Reset`
+    - `testing::TestAccount`
+    - `testing::TestBuilder`
+    - `testing::TestCache`
+    - `testing::TestFvk`
+    - `testing::TestState`
+    - `testing::TransactionSummary`
+    - `testing::input_selector`
+    - `testing::orchard`
+    - `testing::pool`
+    - `testing::sapling`
+
+### Changed
+- Migrated to `orchard 0.10`, `sapling-crypto 0.3`, `shardtree 0.5`,
+  `zcash_address 0.6`, `zcash_primitives 0.19`, `zcash_proofs 0.19`,
+  `zcash_protocol 0.4`.
+- The `Account` trait now uses an associated type for its `AccountId`
+  type instead of a type parameter. This change allows for the simplification
+  of some type signatures.
+- `zcash_client_backend::data_api`:
+  - `WalletSummary::scan_progress` now only reports progress for scanning blocks
+    "near" the chain tip. Progress for scanning earlier blocks is now reported
+    via `WalletSummary::recovery_progress`.
+  - `WalletRead::get_min_unspent_height` has been removed. This was added to make
+    it possible to obtain a "safe truncation" height in order to facilitate rewinds
+    to a greater depth than the available note commitment tree checkpoints provide,
+    but such rewinds are no longer supported.
+- `zcash_client_backend::sync::run`:
+  - Transparent outputs are now refreshed in addition to shielded notes.
+- `zcash_client_backend::proposal::ProposalError` has a new `AnchorNotFound`
+  variant.
+
+### Fixed
+- `zcash_client_backend::tor::grpc` now needs the `lightwalletd-tonic-tls-webpki-roots`
+  feature flag instead of `lightwalletd-tonic`, to fix compilation issues.
+
 ## [0.13.0] - 2024-08-20
 
 `zcash_client_backend` now supports TEX (transparent-source-only) addresses as specified

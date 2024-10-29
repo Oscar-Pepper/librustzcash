@@ -1,7 +1,7 @@
 [package]
 name = "zcash_client_sqlite"
 description = "An SQLite-based Zcash light client"
-version = "0.11.2"
+version = "0.12.2"
 authors = [
     "Jack Grigg <jack@z.cash>",
     "Kris Nuttycombe <kris@electriccoin.co>"
@@ -67,11 +67,14 @@ shardtree = { workspace = true, features = ["legacy-api"] }
 
 # - SQLite databases
 rusqlite = { workspace = true, features = ["time", "array"] }
-schemer.workspace = true
-schemer-rusqlite.workspace = true
+schemerz.workspace = true
+schemerz-rusqlite.workspace = true
 time.workspace = true
 uuid.workspace = true
 regex = "1.4"
+
+# - Sync engine
+tokio = { workspace = true , features = ["fs"] }
 
 # Dependencies used internally:
 # (Breaking upgrades to these are usually backwards-compatible, but check MSRVs.)
@@ -79,9 +82,11 @@ document-features.workspace = true
 maybe-rayon.workspace = true
 
 [dev-dependencies]
+ambassador.workspace = true
 assert_matches.workspace = true
 bls12_381.workspace = true
 incrementalmerkletree = { workspace = true, features = ["test-dependencies"] }
+incrementalmerkletree-testing.workspace = true
 pasta_curves.workspace = true
 shardtree = { workspace = true, features = ["legacy-api", "test-dependencies"] }
 orchard = { workspace = true, features = ["test-dependencies"] }
@@ -92,7 +97,7 @@ tempfile = "3.5.0"
 zcash_keys = { workspace = true, features = ["test-dependencies"] }
 zcash_note_encryption.workspace = true
 zcash_proofs = { workspace = true, features = ["bundled-prover"] }
-zcash_primitives = { workspace = true, features = ["test-dependencies"] }
+zcash_primitives = { workspace = true, features = ["test-dependencies", "non-standard-fees"] }
 zcash_protocol = { workspace = true, features = ["local-consensus"] }
 zcash_client_backend = { workspace = true, features = ["test-dependencies", "unstable-serialization", "unstable-spanning-tree"] }
 zcash_address = { workspace = true, features = ["test-dependencies"] }

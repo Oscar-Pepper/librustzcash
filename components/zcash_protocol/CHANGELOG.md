@@ -8,12 +8,21 @@ and this library adheres to Rust's notion of
 ## [Unreleased]
 
 ### Added
+- `zcash_protocol::value::QuotRem`
+- `zcash_protocol::value::Zatoshis::div_with_remainder`
+
+### Changed
+- MSRV is now 1.77.0.
+
+## [0.4.0] - 2024-10-02
+### Added
 - `impl Sub<BlockHeight> for BlockHeight` unlike the implementation that was
   removed in version `0.3.0`, a saturating subtraction for block heights having
   a return type of `u32` makes sense for `BlockHeight`. Subtracting one block
   height from another yields the delta between them.
 
 ### Changed
+- Mainnet activation height has been set for `consensus::BranchId::Nu6`.
 - Adding a delta to a `BlockHeight` now uses saturating addition.
 - Subtracting a delta to a `BlockHeight` now uses saturating subtraction.
 
@@ -75,9 +84,9 @@ The entries below are relative to the `zcash_primitives` crate as of the tag
 - `zcash_protocol::consensus::Parameters` has been split into two traits, with
   the newly added `NetworkConstants` trait providing all network constant
   accessors. Also, the `address_network` method has been replaced with a new
-  `network_type` method that serves the same purpose. A blanket impl of 
+  `network_type` method that serves the same purpose. A blanket impl of
   `NetworkConstants` is provided for all types that implement `Parameters`,
-  so call sites for methods that have moved to `NetworkConstants` should 
+  so call sites for methods that have moved to `NetworkConstants` should
   remain unchanged (though they may require an additional `use` statement.)
 
 ### Removed
